@@ -21,6 +21,46 @@ pub fn install_deps(dir: &Path, pm: &str) -> Result<()> {
     run_cmd(pm, &["install"], dir, &format!("{pm} install"))
 }
 
+/// Generate all platform icons from public/crab.svg using the local tauri CLI.
+pub fn generate_icons(dir: &Path) -> Result<()> {
+    let output = {
+        #[cfg(windows)]
+        {
+            let bin = dir.join("node_modules\\.bin\\tauri.cmd");
+            Command::new("cmd")
+                .args([std::ffi::OsStr::new("/c")])
+                .arg(&bin)
+                .args(["icon", "public\\crab.svg"])
+                .current_dir(dir)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .output()
+                .context("Failed to run `tauri icon`")?
+        }
+        #[cfg(not(windows))]
+        {
+            let bin = dir.join("node_modules/.bin/tauri");
+            Command::new(&bin)
+                .args(["icon", "public/crab.svg"])
+                .current_dir(dir)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .output()
+                .context("Failed to run `tauri icon`")?
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.lines().last().unwrap_or("").trim().to_string();
+        if detail.is_empty() {
+            anyhow::bail!("`tauri icon` exited with {}", output.status);
+        }
+        anyhow::bail!("`tauri icon` failed: {detail}");
+    }
+    Ok(())
+}
+
 fn run_cmd(program: &str, args: &[&str], dir: &Path, label: &str) -> Result<()> {
     let output = Command::new(program)
         .args(args)

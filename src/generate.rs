@@ -227,6 +227,7 @@ pub fn run(mut config: Config) -> Result<()> {
         Step { label: "Write env & manifest".into(), status: StepStatus::Pending },
         Step { label: "Initialize git repository".into(), status: StepStatus::Pending },
         Step { label: "Install frontend dependencies".into(), status: StepStatus::Pending },
+        Step { label: "Generate app icons".into(), status: StepStatus::Pending },
     ];
 
     if !has_extras {
@@ -237,6 +238,7 @@ pub fn run(mut config: Config) -> Result<()> {
     }
     if no_install {
         steps[8].status = StepStatus::Skipped;
+        steps[9].status = StepStatus::Skipped;
     }
 
     let install_ok = Arc::new(AtomicBool::new(!no_install));
@@ -328,6 +330,13 @@ pub fn run(mut config: Config) -> Result<()> {
                     tx.send(WorkerMsg::StepFailed(8, e.to_string())).ok()
                 }
             };
+
+            if install_ok_c.load(Ordering::Relaxed) {
+                match crate::hooks::generate_icons(&output_c) {
+                    Ok(()) => tx.send(WorkerMsg::StepDone(9)).ok(),
+                    Err(e) => tx.send(WorkerMsg::StepFailed(9, e.to_string())).ok(),
+                };
+            }
         }
 
         tx.send(WorkerMsg::AllDone).ok();

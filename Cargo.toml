@@ -1,0 +1,32 @@
+﻿[package]
+name = "crabyard"
+version = "1.5.6"
+edition = "2021"
+description = "Crabyard — Rust Tauri desktop app starter generator"
+
+[[bin]]
+name = "crabyard"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
+dialoguer = "0.11"
+walkdir = "2"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+flate2 = "1"
+tar = "0.4"
+dirs = "6"
+ratatui = "0.29"
+crossterm = "0.28"
+colored = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

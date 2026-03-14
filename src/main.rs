@@ -1,4 +1,4 @@
-﻿mod add;
+mod add;
 mod config;
 mod doctor;
 mod eject;

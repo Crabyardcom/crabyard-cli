@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "crabyard"
 version = "1.5.6"
 edition = "2021"

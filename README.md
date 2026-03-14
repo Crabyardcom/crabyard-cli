@@ -1,4 +1,4 @@
-﻿# Crabyard CLI
+# Crabyard CLI
 
 A generator that creates production-ready Rust Tauri v2 desktop apps from a modular template system.
 

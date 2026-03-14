@@ -1,4 +1,4 @@
-﻿use std::fmt;
+use std::fmt;
 use std::process::{Command, Stdio};
 
 use anyhow::Result;

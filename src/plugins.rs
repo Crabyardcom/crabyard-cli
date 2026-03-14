@@ -1,4 +1,4 @@
-﻿use colored::Colorize;
+use colored::Colorize;
 
 struct PluginEntry {
     name: &'static str,

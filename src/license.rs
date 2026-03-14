@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use serde::Deserialize;
 
-const API_BASE: &str = "https://crabyard-api-production.up.railway.app";
+const API_BASE: &str = "https://taurikit-api-production.up.railway.app";
 const TEMPLATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Deserialize)]

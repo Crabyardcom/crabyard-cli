@@ -710,8 +710,10 @@ pub fn environment_values(text: &str) -> BTreeMap<String, String> {
 }
 
 fn configured(value: &str) -> bool {
-    !value.trim().is_empty()
-        && !value.to_lowercase().starts_with("your_")
+    let value = value.trim();
+    !value.is_empty()
+        && !value.to_ascii_lowercase().starts_with("your_")
+        && !value.to_ascii_lowercase().contains("placeholder")
         && !value.contains("{{")
         && !value.contains("${")
 }
@@ -722,6 +724,7 @@ fn check_environment(
     recipe: Option<&Recipe>,
 ) -> BTreeMap<String, String> {
     let mut effective = BTreeMap::new();
+    let mut native = BTreeMap::new();
     for path in [
         ".env",
         ".env.local",
@@ -745,6 +748,9 @@ fn check_environment(
             }) {
                 report.add("env.exposed-secret", "Browser environment", Severity::Error, path, "A browser-exposed environment variable appears to contain a secret.", "Remove secrets from VITE_ variables; store credentials in native secure storage or server-side environment variables.");
             }
+            if path == ".env" {
+                native.clone_from(&values);
+            }
             effective.extend(values);
         }
     }
@@ -753,9 +759,11 @@ fn check_environment(
         Some("google") => "GOOGLE_CLIENT_ID",
         _ => return effective,
     };
-    if effective.get(key).is_some_and(|value| {
+    let client_id = std::env::var(key).ok().or_else(|| native.remove(key));
+    if client_id.as_ref().is_some_and(|value| {
         configured(value)
             && value
+                .trim()
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
     }) {
@@ -775,7 +783,7 @@ fn check_environment(
             ".env",
             "The selected authentication provider still needs its public client ID.",
             &format!(
-                "Set {key} in your local environment. Desktop apps must not embed a client secret."
+                "Set {key} in the process environment or .env for native development, and in CI repository variables for packaged builds. Desktop apps must not embed a client secret."
             ),
         );
     }

@@ -236,8 +236,11 @@ fn redact(text: &str) -> String {
                     "ACCESS_TOKEN",
                     "REFRESH_TOKEN",
                     "API_KEY",
+                    "API-KEY",
                     "LICENSE_KEY",
                     "TOKEN",
+                    "AUTHORIZATION",
+                    "COOKIE",
                 ]
                 .iter()
                 .any(|word| key.contains(word))

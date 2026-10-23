@@ -62,6 +62,8 @@ impl Workspace {
             .env("SOURCE_DATE_EPOCH", "1700000000")
             .env_remove("CRABYARD_TEMPLATE")
             .env_remove("CRABYARD_LICENSE_KEY")
+            .env_remove("GITHUB_CLIENT_ID")
+            .env_remove("GOOGLE_CLIENT_ID")
             .output()
             .unwrap()
     }
@@ -636,6 +638,45 @@ fn readiness_explains_oauth_and_updater_delivery_work() {
     let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert!(has_finding(&report, "oauth.missing"));
     assert!(has_finding(&report, "updater.incomplete"));
+
+    let project = workspace.path("project");
+    write(
+        &project.join(".env.production"),
+        "GITHUB_CLIENT_ID=production-id\n",
+    );
+    write(
+        &project.join(".env.local"),
+        "GITHUB_CLIENT_ID=vite-local-id\n",
+    );
+    for value in [
+        "PLACEHOLDER",
+        "placeholder-id",
+        "your_github_client_id_here",
+    ] {
+        write(
+            &project.join(".env"),
+            &format!("GITHUB_CLIENT_ID={value}\n"),
+        );
+        let result = workspace.cli(&["check", "--project", "project", "--json"]);
+        let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert!(has_finding(&report, "oauth.missing"), "Accepted {value}");
+    }
+    write(
+        &project.join(".env"),
+        "GITHUB_CLIENT_ID= valid-native-id \n",
+    );
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "oauth.configured"));
+    write(&project.join(".env"), "GITHUB_CLIENT_ID=PLACEHOLDER\n");
+    let result = Command::new(env!("CARGO_BIN_EXE_crabyard"))
+        .args(["check", "--project", "project", "--json"])
+        .current_dir(&workspace.0)
+        .env("GITHUB_CLIENT_ID", "valid-process-id")
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "oauth.configured"));
 }
 
 #[test]
@@ -659,7 +700,7 @@ fn context_preview_and_export_preserve_secrets_and_existing_documents() {
         &package_path,
         &serde_json::to_string_pretty(&package).unwrap(),
     );
-    let brief = "Build a local-first research notebook with tags.\nAPI_KEY=private-brief-value\nUse sk-sensitive-test-value for development.\nSee (https://user:private-url-password@example.com/api).";
+    let brief = "Build a local-first research notebook with tags.\nAPI_KEY=private-brief-value\nUse sk-sensitive-test-value for development.\nSee (https://user:private-url-password@example.com/api).\nAuthorization: Basic ZmFrZTpmYWtl\nProxy-Authorization: Digest private-digest\nX-API-Key: private-header-key\nCookie: session=private-cookie";
     let before = snapshot(&project);
     let result = workspace.cli(&[
         "context",
@@ -681,6 +722,10 @@ fn context_preview_and_export_preserve_secrets_and_existing_documents() {
         "sk-sensitive-test-value",
         "private-password",
         "private-url-password",
+        "ZmFrZTpmYWtl",
+        "private-digest",
+        "private-header-key",
+        "private-cookie",
     ] {
         assert!(!output.contains(secret), "Leaked {secret}");
     }

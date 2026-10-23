@@ -28,7 +28,7 @@ The apex and `www.crabyard.com` route to the web service; `api.crabyard.com` and
 - API: https://crabyard-api-production.up.railway.app
 - Docs: https://crabyard-docs-production.up.railway.app
 
-During this TLS block, use an explicit trusted endpoint for licensed CLI requests, such as `CRABYARD_API_URL=https://crabyard-api-production.up.railway.app`. The value must be an HTTPS origin without credentials, a path, a query, or a fragment. Installers provide their selected API endpoint during the run. Keep the publishing workflow's `CRABYARD_API_URL` variable on the healthy hosted API until the canonical API domain is ready. Never repeatedly detach or recreate domains to bypass certificate limits.
+During this TLS block, use an explicit trusted endpoint for licensed CLI requests, such as `CRABYARD_API_URL=https://crabyard-api-production.up.railway.app`. The value must be an HTTPS origin without credentials, a path, a query, or a fragment. Installers provide their selected API endpoint during the run. Keep the templates publishing workflow's `API_URL` variable on the healthy hosted API until the canonical API domain is ready. Never repeatedly detach or recreate domains to bypass certificate limits.
 
 Deploy from a service repository with explicit project, environment, and service selectors. Check the latest deployment reaches `SUCCESS` before reporting a release deployed. Database migrations run before API startup through Railway's pre-deploy command.
 

@@ -3,6 +3,7 @@ node_modules/
 
 # Rust build artifacts
 target/
+/.integration-template/
 
 # Build outputs
 dist/

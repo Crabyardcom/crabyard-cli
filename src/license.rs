@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use serde::Deserialize;
 
-const API_BASE: &str = "https://crabyard-api-production.up.railway.app";
-const TEMPLATE_VERSION: &str = "1.7.0";
+const API_BASE: &str = "https://api.crabyard.com";
+const TEMPLATE_VERSION: &str = "1.8.0";
 const MAX_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TEMPLATE_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -28,20 +28,22 @@ struct ValidateResponse {
 }
 
 pub fn validate_and_resolve(license_key: &str) -> Result<PathBuf> {
+    let api = api_base()?;
     let cached = cache_dir().join(TEMPLATE_VERSION);
     if cached.join("base").is_dir() {
-        validate_key(license_key)?;
+        validate_key(license_key, &api)?;
         return Ok(cached);
     }
 
-    validate_key(license_key)?;
-    let download_url = format!("{API_BASE}/template/{TEMPLATE_VERSION}");
+    validate_key(license_key, &api)?;
+    let download_url = api.join(&format!("template/{TEMPLATE_VERSION}"))?;
 
-    download_template(&download_url, license_key, &cached)?;
+    download_template(download_url.as_str(), license_key, &cached, &api)?;
     Ok(cached)
 }
 
 pub fn refresh_cache(license_key: &str) -> Result<PathBuf> {
+    api_base()?;
     let cached = cache_dir().join(TEMPLATE_VERSION);
     if cached.exists() {
         fs::remove_dir_all(&cached)
@@ -50,19 +52,41 @@ pub fn refresh_cache(license_key: &str) -> Result<PathBuf> {
     validate_and_resolve(license_key)
 }
 
-fn validate_key(license_key: &str) -> Result<()> {
+fn api_base() -> Result<reqwest::Url> {
+    let base = match std::env::var("CRABYARD_API_URL") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => API_BASE.into(),
+        Err(_) => anyhow::bail!("CRABYARD_API_URL must be valid Unicode"),
+    };
+    validate_api_base(&base)
+}
+
+fn validate_api_base(value: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(value).context("CRABYARD_API_URL is not a valid URL")?;
+    anyhow::ensure!(
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "CRABYARD_API_URL must be an HTTPS origin without credentials, path, query, or fragment"
+    );
+    Ok(url)
+}
+
+fn validate_key(license_key: &str, api: &reqwest::Url) -> Result<()> {
     let resp = client()?
-        .post(format!("{API_BASE}/license/validate"))
+        .post(api.join("license/validate")?)
         .json(&serde_json::json!({ "key": license_key }))
         .send()
-        .context("Failed to reach license server")?;
+        .context("Failed to reach the configured license server. Check its HTTPS connection or configure a trusted CRABYARD_API_URL endpoint")?;
 
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED
         || resp.status() == reqwest::StatusCode::FORBIDDEN
     {
-        anyhow::bail!(
-            "Invalid license key. Purchase one at https://crabyard-web-production.up.railway.app"
-        );
+        anyhow::bail!("Invalid license key. Purchase one at https://crabyard.com");
     }
 
     if !resp.status().is_success() {
@@ -84,8 +108,8 @@ fn validate_key(license_key: &str) -> Result<()> {
     Ok(())
 }
 
-fn download_template(url: &str, license_key: &str, dest: &Path) -> Result<()> {
-    validate_download_url(url)?;
+fn download_template(url: &str, license_key: &str, dest: &Path, api: &reqwest::Url) -> Result<()> {
+    validate_download_url(url, api)?;
     println!("  Downloading template v{TEMPLATE_VERSION}...");
 
     let resp = client()?
@@ -123,9 +147,8 @@ fn download_template(url: &str, license_key: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_download_url(url: &str) -> Result<()> {
+fn validate_download_url(url: &str, expected: &reqwest::Url) -> Result<()> {
     let parsed = reqwest::Url::parse(url).context("Invalid template download URL")?;
-    let expected = reqwest::Url::parse(API_BASE)?;
     anyhow::ensure!(
         parsed.origin() == expected.origin()
             && parsed.username().is_empty()
@@ -178,14 +201,35 @@ mod tests {
 
     #[test]
     fn license_credentials_stay_on_the_api_origin() {
-        assert!(validate_download_url(&format!("{API_BASE}/template/1.6.0")).is_ok());
+        let api = validate_api_base(API_BASE).unwrap();
+        assert!(validate_download_url(&format!("{API_BASE}/template/1.8.0"), &api).is_ok());
         for url in [
-            "http://crabyard-api-production.up.railway.app/template/1.6.0",
+            "http://api.crabyard.com/template/1.8.0",
             "https://example.com/template",
-            "https://crabyard-api-production.up.railway.app.example.com/template",
-            "https://user:password@crabyard-api-production.up.railway.app/template",
+            "https://api.crabyard.com.example.com/template",
+            "https://user:password@api.crabyard.com/template",
         ] {
-            assert!(validate_download_url(url).is_err(), "{url}");
+            assert!(validate_download_url(url, &api).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn explicit_api_overrides_remain_https_origins_and_confine_download_credentials() {
+        let api = validate_api_base("https://crabyard-api-production.up.railway.app").unwrap();
+        assert!(validate_download_url(
+            "https://crabyard-api-production.up.railway.app/template/1.8.0",
+            &api
+        )
+        .is_ok());
+        assert!(validate_download_url("https://api.crabyard.com/template/1.8.0", &api).is_err());
+        for value in [
+            "http://localhost",
+            "https://user:password@example.com",
+            "https://example.com/private",
+            "https://example.com?token=value",
+            "https://example.com#fragment",
+        ] {
+            assert!(validate_api_base(value).is_err());
         }
     }
 

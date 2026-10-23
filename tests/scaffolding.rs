@@ -25,17 +25,29 @@ impl Workspace {
     fn template(&self) -> PathBuf {
         let template = self.path("template");
         for (path, content) in [
-            ("base/package.json", r#"{"name":"{{APP_SLUG}}","version":"{{APP_VERSION}}","description":"{{APP_DESCRIPTION}}","dependencies":{}}"#),
-            ("base/manifest.toml", "[project]\napp_name = \"{{APP_NAME}}\"\nauthor = \"{{APP_AUTHOR}}\"\n"),
+            ("base/package.json", r#"{"name":"{{APP_SLUG}}","version":"{{APP_VERSION}}","description":"{{APP_DESCRIPTION}}","scripts":{"check":"verify","test":"test","build":"build"},"dependencies":{"react":"^19"}}"#),
+            ("base/manifest.toml", "[project]\napp_name = \"{{APP_NAME}}\"\nauthor = \"{{APP_AUTHOR}}\"\napp_slug = \"{{APP_SLUG}}\"\napp_bundle_id = \"{{APP_BUNDLE_ID}}\"\napp_version = \"{{APP_VERSION}}\"\n[modules.auth]\nselected = \"{{AUTH_MODULE}}\"\n[modules.ui]\nselected = \"{{UI_MODULE}}\"\n[modules.package_manager]\nselected = \"{{PACKAGE_MANAGER}}\"\n"),
             ("base/src-tauri/Cargo.toml", "[package]\nname = \"{{APP_SLUG}}\"\nversion = \"{{APP_VERSION}}\"\n[dependencies]\ntauri = { version = \"2\", features = [\"custom-protocol\"] }\n"),
-            ("base/src-tauri/tauri.conf.json", r#"{"productName":"{{APP_NAME}}","identifier":"{{APP_BUNDLE_ID}}"}"#),
+            ("base/src-tauri/tauri.conf.json", r#"{"productName":"{{APP_NAME}}","identifier":"{{APP_BUNDLE_ID}}","version":"{{APP_VERSION}}","app":{"security":{"csp":"default-src 'self'"}},"bundle":{"createUpdaterArtifacts":false}}"#),
             ("base/src-tauri/src/lib.rs", "fn main() { tauri::Builder::default().setup(|app| { Ok(()) }); }\n"),
-            ("base/src-tauri/capabilities/default.json", r#"{"permissions":["core:default"]}"#),
+            ("base/src-tauri/capabilities/default.json", r#"{"windows":["main"],"permissions":["core:default"]}"#),
             ("base/index.html", "<title>{{APP_NAME}}</title>\n"),
             ("base/src/title.ts", "const title = \"{{APP_NAME}}\";\n"),
             ("auth/none/.env.example", "VITE_APP_NAME={{APP_NAME}}\n"),
             ("ui/minimal/module.json", "{}"),
             ("ui/shadcn/module.json", "{}"),
+            ("auth/github/.env.example", "GITHUB_CLIENT_ID=your_github_client_id_here\n"),
+            ("base/.gitignore", ".env\n.env.*\n!.env.example\n*.key\n*.p12\n"),
+            ("base/AGENTS.md", "# Project instructions\nUse acceptance criteria and verify changes.\n"),
+            ("base/CLAUDE.md", "Read AGENTS.md.\n"),
+            ("base/GEMINI.md", "Read AGENTS.md.\n"),
+            ("base/.github/copilot-instructions.md", "Read AGENTS.md.\n"),
+            ("base/.cursor/rules/project.mdc", "Read AGENTS.md.\n"),
+            ("base/docs/PROJECT.md", "# Product brief\nDefine the user's problem and acceptance criteria.\n"),
+            ("base/docs/tasks/FEATURE.md", "# Feature acceptance criteria\n"),
+            ("base/docs/HANDOFF.md", "# Implementation handoff\n"),
+            ("base/.github/workflows/ci.yml", "name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run check\n"),
+            ("base/.github/workflows/release.yml", "name: Release\non: workflow_dispatch\njobs:\n  release:\n    runs-on: ubuntu-latest\n    env:\n      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n    steps:\n      - run: npm run build\n"),
         ] {
             write(&template.join(path), content);
         }
@@ -52,6 +64,52 @@ impl Workspace {
             .env_remove("CRABYARD_LICENSE_KEY")
             .output()
             .unwrap()
+    }
+
+    fn generate_project(&self, pm: &str) -> PathBuf {
+        self.template();
+        assert_success(&self.cli(&[
+            "new",
+            "Field Notes",
+            "--slug",
+            "field-notes",
+            "--bundle-id",
+            "com.crabyard.fieldnotes",
+            "--preset",
+            "minimal",
+            "--pm",
+            pm,
+            "--template",
+            "template",
+            "--output",
+            "project",
+            "--no-git",
+            "--no-install",
+        ]));
+        self.path("project")
+    }
+
+    fn lock_project(&self, pm: &str) {
+        let root = self.path("project");
+        let package: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(root.join("package.json")).unwrap()).unwrap();
+        let root_package = serde_json::json!({"name":package["name"], "version":package["version"], "dependencies":package["dependencies"]});
+        let (name, text) = match pm {
+            "npm" => ("package-lock.json", serde_json::to_string_pretty(&serde_json::json!({"lockfileVersion":3,"packages":{"":root_package}})).unwrap()),
+            "bun" => ("bun.lock", format!("// Bun text lockfile\n{}\n", serde_json::to_string_pretty(&serde_json::json!({"lockfileVersion":1,"workspaces":{"":root_package},"packages":{}})).unwrap())),
+            "pnpm" => {
+                let deps: serde_json::Map<_, _> = package["dependencies"].as_object().unwrap().iter().map(|(name, version)| (name.clone(), serde_json::json!({"specifier":version,"version":"19.0.0"}))).collect();
+                let document = serde_yaml_ng::to_string(&serde_json::json!({"lockfileVersion":"9.0","importers":{".":{"dependencies":deps}}})).unwrap();
+                ("pnpm-lock.yaml", format!("---\nlockfileVersion: '9.0'\nconfigDependencies: {{}}\n---\n{document}"))
+            }
+            "yarn" => ("yarn.lock", package["dependencies"].as_object().unwrap().iter().map(|(name, version)| format!("\"{}@{}\":\n  version \"19.0.0\"\n", name, version.as_str().unwrap())).collect()),
+            _ => unreachable!(),
+        };
+        write(&root.join(name), &text);
+        write(
+            &root.join("src-tauri/Cargo.lock"),
+            "version = 4\n[[package]]\nname = \"field-notes\"\nversion = \"0.1.0\"\ndependencies = [\"tauri\"]\n",
+        );
     }
 }
 
@@ -72,6 +130,28 @@ fn assert_success(result: &Output) {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+fn snapshot(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .map(Result::unwrap)
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| {
+            (
+                entry.path().strip_prefix(root).unwrap().to_path_buf(),
+                fs::read(entry.path()).unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn has_finding(report: &serde_json::Value, id: &str) -> bool {
+    report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["id"] == id)
 }
 
 #[test]
@@ -394,6 +474,368 @@ fn added_features_are_saved_in_recipe_for_replay() {
             toml::Value::String("updater".into())
         ]
     );
+}
+
+#[test]
+fn readiness_is_read_only_and_strict_gates_uninstalled_projects() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    let before = snapshot(&project);
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    assert_success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["summary"]["errors"], 0);
+    assert!(has_finding(&report, "lock.missing"));
+    assert!(has_finding(&report, "lock.rust-missing"));
+    let strict = workspace.cli(&["check", "--project", "project", "--json", "--strict"]);
+    assert_eq!(strict.status.code(), Some(1));
+    let strict: serde_json::Value = serde_json::from_slice(&strict.stdout).unwrap();
+    assert_eq!(strict["passed"], false);
+    assert_eq!(snapshot(&project), before);
+    let human = workspace.cli(&["check", "--project", "project"]);
+    assert_success(&human);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("Frontend lockfile"));
+}
+
+#[test]
+fn readiness_accepts_current_lockfiles_and_detects_changed_specs_for_all_package_managers() {
+    for pm in ["npm", "bun", "pnpm", "yarn"] {
+        let workspace = Workspace::new();
+        let project = workspace.generate_project(pm);
+        workspace.lock_project(pm);
+        let ready = workspace.cli(&["check", "--project", "project", "--strict", "--json"]);
+        assert_success(&ready);
+        let ready: serde_json::Value = serde_json::from_slice(&ready.stdout).unwrap();
+        assert_eq!(ready["summary"]["warnings"], 0, "{pm}: {ready}");
+        assert!(has_finding(&ready, "lock.frontend"));
+        let package_path = project.join("package.json");
+        let mut package: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&package_path).unwrap()).unwrap();
+        package["dependencies"]["react"] = serde_json::json!("^20");
+        write(
+            &package_path,
+            &serde_json::to_string_pretty(&package).unwrap(),
+        );
+        let stale = workspace.cli(&["check", "--project", "project", "--json"]);
+        assert_eq!(stale.status.code(), Some(1), "{pm}");
+        let stale: serde_json::Value = serde_json::from_slice(&stale.stdout).unwrap();
+        assert!(has_finding(&stale, "lock.stale"), "{pm}: {stale}");
+    }
+}
+
+#[test]
+fn readiness_aggregates_actionable_security_and_identity_failures_without_secret_values() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    workspace.lock_project("npm");
+    let config_path = project.join("src-tauri/tauri.conf.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["identifier"] = serde_json::json!("com.wrong.product");
+    config["app"]["security"]["csp"] = serde_json::Value::Null;
+    write(
+        &config_path,
+        &serde_json::to_string_pretty(&config).unwrap(),
+    );
+    write(
+        &project.join("src-tauri/capabilities/default.json"),
+        r#"{"windows":["main"],"permissions":["*"]}"#,
+    );
+    write(
+        &project.join(".env"),
+        "VITE_CLIENT_SECRET=never-print-this-value\nINTERNAL_PASSWORD=another-private-value\n",
+    );
+    write(
+        &project.join(".gitignore"),
+        ".env\n.env.*\n!.env.example\n!.env.production\n*.key\n*.p12\n",
+    );
+    let before = snapshot(&project);
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    assert_eq!(result.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    for id in [
+        "identity.mismatch",
+        "security.csp",
+        "capabilities.wildcard",
+        "env.exposed-secret",
+        "gitignore.env",
+    ] {
+        assert!(has_finding(&report, id), "{id}: {report}");
+    }
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!output.contains("never-print-this-value"));
+    assert!(!output.contains("another-private-value"));
+    assert_eq!(snapshot(&project), before);
+}
+
+#[test]
+fn readiness_handles_missing_and_corrupt_projects_as_json() {
+    let workspace = Workspace::new();
+    let result = workspace.cli(&["check", "--project", "missing", "--json"]);
+    assert_eq!(result.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "project.missing"));
+    let project = workspace.generate_project("npm");
+    write(
+        &project.join("package.json"),
+        "{malformed: private-error-payload",
+    );
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "manifest.invalid"));
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("private-error-payload"));
+}
+
+#[test]
+fn readiness_detects_native_only_dependency_changes() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    workspace.lock_project("npm");
+    assert_success(&workspace.cli(&["add", "window-state", "--project", "project"]));
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    assert_eq!(result.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "lock.rust-stale"));
+    assert!(has_finding(&report, "lock.frontend"));
+    assert!(project.join("src-tauri/Cargo.lock").is_file());
+}
+
+#[test]
+fn readiness_explains_oauth_and_updater_delivery_work() {
+    let workspace = Workspace::new();
+    workspace.template();
+    assert_success(&workspace.cli(&[
+        "new",
+        "Field Notes",
+        "--slug",
+        "field-notes",
+        "--bundle-id",
+        "com.crabyard.fieldnotes",
+        "--auth",
+        "github",
+        "--ui",
+        "minimal",
+        "--pm",
+        "npm",
+        "--extras",
+        "updater",
+        "--template",
+        "template",
+        "--output",
+        "project",
+        "--no-git",
+        "--no-install",
+    ]));
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    assert_success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "oauth.missing"));
+    assert!(has_finding(&report, "updater.incomplete"));
+}
+
+#[test]
+fn context_preview_and_export_preserve_secrets_and_existing_documents() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    write(
+        &project.join(".env"),
+        "INTERNAL_PASSWORD=private-environment-value\nGITHUB_CLIENT_ID=public-client-id\n",
+    );
+    write(
+        &project.join("keys/signing.key"),
+        "private-signing-material",
+    );
+    let package_path = project.join("package.json");
+    let mut package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&package_path).unwrap()).unwrap();
+    package["dependencies"]["private-sdk"] =
+        serde_json::json!("https://private-user:private-password@example.com/sdk.git");
+    write(
+        &package_path,
+        &serde_json::to_string_pretty(&package).unwrap(),
+    );
+    let brief = "Build a local-first research notebook with tags.\nAPI_KEY=private-brief-value\nUse sk-sensitive-test-value for development.\nSee (https://user:private-url-password@example.com/api).";
+    let before = snapshot(&project);
+    let result = workspace.cli(&[
+        "context",
+        "--project",
+        "project",
+        "--brief",
+        brief,
+        "--dry-run",
+    ]);
+    assert_success(&result);
+    let output = String::from_utf8(result.stdout).unwrap();
+    assert!(output.contains("local-first research notebook with tags"));
+    assert!(output.contains("AGENTS.md"));
+    assert!(output.contains("npm run check"));
+    for secret in [
+        "private-environment-value",
+        "private-signing-material",
+        "private-brief-value",
+        "sk-sensitive-test-value",
+        "private-password",
+        "private-url-password",
+    ] {
+        assert!(!output.contains(secret), "Leaked {secret}");
+    }
+    assert_eq!(snapshot(&project), before);
+    let exported = workspace.cli(&[
+        "context",
+        "--project",
+        "project",
+        "--brief",
+        "Build a research notebook.",
+    ]);
+    assert_success(&exported);
+    let path = project.join("docs/AI_CONTEXT.md");
+    assert!(path.is_file());
+    let original = fs::read(&path).unwrap();
+    let repeated = workspace.cli(&[
+        "context",
+        "--project",
+        "project",
+        "--brief",
+        "Overwrite this.",
+    ]);
+    assert!(!repeated.status.success());
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let escape = workspace.cli(&[
+        "context",
+        "--project",
+        "project",
+        "--brief",
+        "Build notes.",
+        "--output",
+        "../escaped.md",
+    ]);
+    assert!(!escape.status.success());
+    assert!(!workspace.path("escaped.md").exists());
+}
+
+#[test]
+fn generation_can_export_an_ai_brief_without_serializing_its_secrets() {
+    let workspace = Workspace::new();
+    workspace.template();
+    let brief = "Build a research notebook.\nAPI_TOKEN=brief-secret-value";
+    let dry_run = workspace.cli(&[
+        "new",
+        "Notes",
+        "--preset",
+        "minimal",
+        "--brief",
+        brief,
+        "--dry-run",
+    ]);
+    assert_success(&dry_run);
+    let plan: serde_json::Value = serde_json::from_slice(&dry_run.stdout).unwrap();
+    assert_eq!(plan["context_output"], "docs/AI_CONTEXT.md");
+    assert!(!String::from_utf8_lossy(&dry_run.stdout).contains("brief-secret-value"));
+    assert_success(&workspace.cli(&[
+        "new",
+        "Notes",
+        "--preset",
+        "minimal",
+        "--brief",
+        brief,
+        "--description",
+        "Public description",
+        "--template",
+        "template",
+        "--output",
+        "project",
+        "--no-git",
+        "--no-install",
+    ]));
+    let context = fs::read_to_string(workspace.path("project/docs/AI_CONTEXT.md")).unwrap();
+    assert!(context.contains("Build a research notebook."));
+    assert!(!context.contains("brief-secret-value"));
+    let recipe = fs::read_to_string(workspace.path("project/crabyard.recipe.toml")).unwrap();
+    assert!(!recipe.contains("brief-secret-value"));
+    assert!(recipe.contains("Public description"));
+}
+
+#[test]
+fn removed_ui_is_rejected_before_template_access() {
+    let workspace = Workspace::new();
+    for args in [
+        vec![
+            "new",
+            "App",
+            "--ui",
+            "legacy-ui",
+            "--yes",
+            "--template",
+            "missing",
+        ],
+        vec!["preview", "--ui", "legacy-ui", "--template", "missing"],
+    ] {
+        let result = workspace.cli(&args);
+        assert!(!result.status.success());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains("Unknown UI framework"));
+        assert!(error.contains("shadcn, daisyui, minimal"));
+    }
+    assert_eq!(fs::read_dir(&workspace.0).unwrap().count(), 0);
+}
+
+#[test]
+fn switching_ui_keeps_the_replay_recipe_and_audit_consistent() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    workspace.lock_project("npm");
+    let result = Command::new(env!("CARGO_BIN_EXE_crabyard"))
+        .args(["update-ui", "--switch", "shadcn", "--template"])
+        .arg(workspace.path("template"))
+        .current_dir(&project)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_success(&result);
+    let recipe: toml::Value =
+        toml::from_str(&fs::read_to_string(project.join("crabyard.recipe.toml")).unwrap()).unwrap();
+    assert_eq!(recipe["ui"].as_str(), Some("shadcn"));
+    let result = workspace.cli(&["check", "--project", "project", "--json"]);
+    assert_success(&result);
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert!(has_finding(&report, "identity.consistent"));
+}
+
+#[test]
+fn help_does_not_echo_environment_license_keys() {
+    let result = Command::new(env!("CARGO_BIN_EXE_crabyard"))
+        .args(["new", "--help"])
+        .env("CRABYARD_LICENSE_KEY", "private-license-help-value")
+        .output()
+        .unwrap();
+    assert_success(&result);
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("private-license-help-value"));
+}
+
+#[cfg(unix)]
+#[test]
+fn context_rejects_output_through_an_external_symlink() {
+    let workspace = Workspace::new();
+    let project = workspace.generate_project("npm");
+    let outside = workspace.path("outside");
+    fs::create_dir(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, project.join("export")).unwrap();
+    let result = workspace.cli(&[
+        "context",
+        "--project",
+        "project",
+        "--brief",
+        "Build notes.",
+        "--output",
+        "export/context.md",
+    ]);
+    assert!(!result.status.success());
+    assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
 }
 
 #[test]

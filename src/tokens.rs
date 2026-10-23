@@ -21,6 +21,18 @@ pub fn replace_for_path(content: &str, tokens: &TokenMap, path: &Path) -> String
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
+    if filename == ".env" || filename.starts_with(".env.") {
+        let mut result = content.to_string();
+        for (key, value) in tokens {
+            let value = serde_json::to_string(value).expect("String serialization cannot fail");
+            let placeholder = format!("{{{{{key}}}}}");
+            result = result
+                .replace(&format!("\"{placeholder}\""), &value)
+                .replace(&format!("'{placeholder}'"), &value)
+                .replace(&placeholder, &value);
+        }
+        return result;
+    }
     let escaped: TokenMap = tokens
         .iter()
         .map(|(key, value)| {
@@ -36,9 +48,6 @@ pub fn replace_for_path(content: &str, tokens: &TokenMap, path: &Path) -> String
                     .replace('>', "&gt;")
                     .replace('"', "&quot;")
                     .replace('\'', "&#39;"),
-                _ if filename == ".env" || filename.starts_with(".env.") => {
-                    serde_json::to_string(value).expect("String serialization cannot fail")
-                }
                 _ => value.clone(),
             };
             (key.clone(), value)
@@ -138,5 +147,20 @@ mod tests {
         assert!(is_binary_path(Path::new("bun.lock")));
         assert!(!is_binary_path(Path::new("main.rs")));
         assert!(!is_binary_path(Path::new("Cargo.toml")));
+    }
+
+    #[test]
+    fn environment_placeholders_are_quoted_once() {
+        let values = TokenMap::from([("APP_NAME".into(), "An \"App\"".into())]);
+        for template in [
+            "VITE_APP_NAME={{APP_NAME}}\n",
+            "VITE_APP_NAME=\"{{APP_NAME}}\"\n",
+            "VITE_APP_NAME='{{APP_NAME}}'\n",
+        ] {
+            assert_eq!(
+                replace_for_path(template, &values, Path::new(".env.example")),
+                "VITE_APP_NAME=\"An \\\"App\\\"\"\n"
+            );
+        }
     }
 }

@@ -21,3 +21,13 @@ jobs:
       - run: cargo test --locked
       - run: cargo clippy --all-targets --locked
       - run: cargo run --locked -- presets --json
+      - uses: actions/checkout@v4
+        with:
+          repository: Crabyardcom/crabyard-templates
+          ref: 0487ac8fdbad23e95d7e3858b2dcebc39348e291
+          path: .integration-template
+          persist-credentials: false
+      - name: Test the compatible template with the real CLI
+        env:
+          CRABYARD_TEST_TEMPLATE: ${{ github.workspace }}/.integration-template
+        run: cargo test --locked --test template_project -- --ignored

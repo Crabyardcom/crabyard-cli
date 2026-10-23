@@ -14,6 +14,8 @@ pub struct Config {
 }
 
 pub fn run(config: Config) -> Result<()> {
+    crate::recipe::validate_ui(&config.ui)?;
+    crate::recipe::validate_auth(&config.auth)?;
     let template =
         crate::generate::resolve_template_path(config.template, config.license_key.as_deref())?;
 

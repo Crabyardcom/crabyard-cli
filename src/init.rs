@@ -34,7 +34,7 @@ pub fn run(config: Config) -> Result<()> {
     let slug = slug_from_name(&app_name);
 
     let auth = select_option("Auth module", &["none", "github", "google"])?;
-    let ui = select_option("UI framework", &["shadcn", "daisyui", "tesign", "minimal"])?;
+    let ui = select_option("UI framework", &["shadcn", "daisyui", "minimal"])?;
     let pm = detect_pm(&project_dir);
 
     let manifest = format!(

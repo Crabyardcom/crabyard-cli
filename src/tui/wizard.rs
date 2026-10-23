@@ -142,17 +142,13 @@ pub fn run_wizard(
             description: "Tailwind component library".into(),
         },
         SelectItem {
-            label: "tesign".into(),
-            description: "Custom design system".into(),
-        },
-        SelectItem {
             label: "minimal".into(),
             description: "Tailwind only, no components".into(),
         },
     ];
     let mut ui_select = SelectState::new(ui_items);
     if let Some(ui) = pre_ui {
-        let idx = ["shadcn", "daisyui", "tesign", "minimal"]
+        let idx = ["shadcn", "daisyui", "minimal"]
             .iter()
             .position(|&u| u == ui)
             .unwrap_or(0);

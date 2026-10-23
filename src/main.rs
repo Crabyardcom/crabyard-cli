@@ -1,5 +1,7 @@
 mod add;
+mod check;
 mod config;
+mod context;
 mod doctor;
 mod eject;
 mod generate;
@@ -9,6 +11,7 @@ mod license;
 mod overlay;
 mod plugins;
 mod preview;
+mod project;
 mod recipe;
 mod tokens;
 mod tui;
@@ -31,6 +34,30 @@ struct Cli {
 enum Commands {
     /// Check system prerequisites for Crabyard development
     Doctor,
+
+    /// Audit a generated project's configuration and delivery readiness without changing files
+    Check {
+        #[arg(long, short, default_value = ".", value_name = "DIR")]
+        project: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Fail on warnings as well as errors
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Export a focused AI implementation brief without copying secrets or source files
+    Context {
+        #[arg(long, short, default_value = ".", value_name = "DIR")]
+        project: PathBuf,
+        #[arg(long, value_name = "TEXT")]
+        brief: String,
+        #[arg(long, short, default_value = "docs/AI_CONTEXT.md", value_name = "FILE")]
+        output: PathBuf,
+        /// Print the context without writing or overwriting files
+        #[arg(long)]
+        dry_run: bool,
+    },
 
     /// Create a new Crabyard project (interactive by default)
     New {
@@ -61,7 +88,7 @@ enum Commands {
         #[arg(long, value_name = "MODULE")]
         auth: Option<String>,
 
-        /// UI framework: shadcn, daisyui, or tesign
+        /// UI framework: shadcn, daisyui, or minimal
         #[arg(long, value_name = "FRAMEWORK")]
         ui: Option<String>,
 
@@ -92,7 +119,12 @@ enum Commands {
 
         /// License key for template download
         /// [env: CRABYARD_LICENSE_KEY]
-        #[arg(long, env = "CRABYARD_LICENSE_KEY", value_name = "KEY")]
+        #[arg(
+            long,
+            env = "CRABYARD_LICENSE_KEY",
+            hide_env_values = true,
+            value_name = "KEY"
+        )]
         license_key: Option<String>,
 
         /// Extras to include (comma-separated): notifications,clipboard,sql,...
@@ -110,6 +142,10 @@ enum Commands {
         /// Print the resolved JSON plan without downloads, installs, or file changes
         #[arg(long)]
         dry_run: bool,
+
+        /// Generate docs/AI_CONTEXT.md from a product brief after scaffolding
+        #[arg(long, value_name = "TEXT")]
+        brief: Option<String>,
     },
 
     /// List curated project presets
@@ -121,7 +157,7 @@ enum Commands {
 
     /// Update or switch the UI framework in an existing project
     UpdateUi {
-        /// Switch to a different UI framework: shadcn, daisyui, tesign, or minimal
+        /// Switch to a different UI framework: shadcn, daisyui, or minimal
         #[arg(long, value_name = "FRAMEWORK")]
         switch: Option<String>,
 
@@ -132,7 +168,12 @@ enum Commands {
 
         /// License key for template download
         /// [env: CRABYARD_LICENSE_KEY]
-        #[arg(long, env = "CRABYARD_LICENSE_KEY", value_name = "KEY")]
+        #[arg(
+            long,
+            env = "CRABYARD_LICENSE_KEY",
+            hide_env_values = true,
+            value_name = "KEY"
+        )]
         license_key: Option<String>,
 
         /// Overwrite locally modified files without prompting
@@ -179,7 +220,7 @@ enum Commands {
         #[arg(long, default_value = "none")]
         auth: String,
 
-        /// UI framework: shadcn, daisyui, tesign, or minimal
+        /// UI framework: shadcn, daisyui, or minimal
         #[arg(long, default_value = "shadcn")]
         ui: String,
 
@@ -190,7 +231,12 @@ enum Commands {
 
         /// License key for template download
         /// [env: CRABYARD_LICENSE_KEY]
-        #[arg(long, env = "CRABYARD_LICENSE_KEY", value_name = "KEY")]
+        #[arg(
+            long,
+            env = "CRABYARD_LICENSE_KEY",
+            hide_env_values = true,
+            value_name = "KEY"
+        )]
         license_key: Option<String>,
     },
 
@@ -203,7 +249,12 @@ enum Commands {
 
         /// License key for template download
         /// [env: CRABYARD_LICENSE_KEY]
-        #[arg(long, env = "CRABYARD_LICENSE_KEY", value_name = "KEY")]
+        #[arg(
+            long,
+            env = "CRABYARD_LICENSE_KEY",
+            hide_env_values = true,
+            value_name = "KEY"
+        )]
         license_key: Option<String>,
 
         /// Overwrite locally modified files without prompting
@@ -243,6 +294,32 @@ fn main() -> anyhow::Result<()> {
         Commands::Doctor => {
             doctor::run()?;
         }
+        Commands::Check {
+            project,
+            json,
+            strict,
+        } => {
+            if !check::run(check::Config {
+                project,
+                json,
+                strict,
+            })? {
+                std::process::exit(1);
+            }
+        }
+        Commands::Context {
+            project,
+            brief,
+            output,
+            dry_run,
+        } => {
+            context::run(context::Config {
+                project,
+                brief,
+                output,
+                dry_run,
+            })?;
+        }
         Commands::New {
             app_name,
             slug,
@@ -263,6 +340,7 @@ fn main() -> anyhow::Result<()> {
             recipe,
             preset,
             dry_run,
+            brief,
         } => {
             generate::run(generate::Config {
                 app_name,
@@ -284,6 +362,7 @@ fn main() -> anyhow::Result<()> {
                 recipe,
                 preset,
                 dry_run,
+                brief,
             })?;
         }
         Commands::Presets { json } => recipe::list(json)?,

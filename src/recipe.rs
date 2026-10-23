@@ -139,12 +139,8 @@ impl Recipe {
         }
         semver::Version::parse(&self.app_version)
             .context("App version must be valid semantic versioning, for example 0.1.0")?;
-        validate_choice("Auth module", &self.auth, &["github", "google", "none"])?;
-        validate_choice(
-            "UI framework",
-            &self.ui,
-            &["shadcn", "daisyui", "tesign", "minimal"],
-        )?;
+        validate_auth(&self.auth)?;
+        validate_ui(&self.ui)?;
         validate_choice("Package manager", &self.pm, &["bun", "pnpm", "yarn", "npm"])?;
         for extra in &self.extras {
             crate::add::validate_feature(extra)?;
@@ -159,6 +155,14 @@ impl Recipe {
         )
         .context("Failed to write crabyard.recipe.toml")
     }
+}
+
+pub fn validate_ui(value: &str) -> Result<()> {
+    validate_choice("UI framework", value, &["shadcn", "daisyui", "minimal"])
+}
+
+pub fn validate_auth(value: &str) -> Result<()> {
+    validate_choice("Auth module", value, &["github", "google", "none"])
 }
 
 fn validate_choice(label: &str, value: &str, choices: &[&str]) -> Result<()> {

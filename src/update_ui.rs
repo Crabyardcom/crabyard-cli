@@ -9,7 +9,7 @@ use crate::license;
 use crate::overlay;
 use crate::tokens;
 
-const UI_OPTIONS: &[&str] = &["shadcn", "daisyui", "tesign", "minimal"];
+const UI_OPTIONS: &[&str] = &["shadcn", "daisyui", "minimal"];
 
 pub struct Config {
     pub switch: Option<String>,
@@ -37,6 +37,12 @@ pub fn run(config: Config) -> Result<()> {
     }
 
     let manifest = read_manifest(&manifest_path)?;
+    let recipe_path = project_dir.join("crabyard.recipe.toml");
+    let mut recipe = if recipe_path.exists() {
+        Some(crate::recipe::Recipe::read(&recipe_path)?)
+    } else {
+        None
+    };
 
     let target_ui = if config.rollback {
         match &manifest.previous_ui {
@@ -65,6 +71,7 @@ pub fn run(config: Config) -> Result<()> {
         }
     };
 
+    crate::recipe::validate_ui(&target_ui)?;
     let switching = target_ui != manifest.current_ui;
 
     println!();
@@ -105,7 +112,7 @@ pub fn run(config: Config) -> Result<()> {
 
     let changes = compute_changes(&ui_dir, &project_dir)?;
 
-    if changes.is_empty() {
+    if changes.is_empty() && !switching {
         println!(
             "\n  {} All UI files are already up to date.",
             "✓".truecolor(34, 197, 94).bold()
@@ -163,6 +170,10 @@ pub fn run(config: Config) -> Result<()> {
     if switching {
         set_manifest_previous_ui(&manifest_path, &manifest.current_ui)?;
         update_manifest_ui(&manifest_path, &manifest.current_ui, &target_ui)?;
+        if let Some(recipe) = &mut recipe {
+            recipe.ui = target_ui.clone();
+            recipe.write(&project_dir)?;
+        }
     }
 
     let applied = changes.len();

@@ -103,9 +103,16 @@ pub struct Config {
     pub recipe: Option<PathBuf>,
     pub preset: Option<Preset>,
     pub dry_run: bool,
+    pub brief: Option<String>,
 }
 
 pub fn run(mut config: Config) -> Result<()> {
+    if let Some(brief) = &config.brief {
+        anyhow::ensure!(
+            !brief.trim().is_empty() && brief.len() <= 16 * 1024,
+            "--brief must contain between 1 and 16384 bytes"
+        );
+    }
     let generated_at = unix_timestamp()?;
     if let Some(path) = &config.recipe {
         Recipe::read(path)?.apply(&mut config);
@@ -203,6 +210,7 @@ pub fn run(mut config: Config) -> Result<()> {
                 "install_dependencies": !config.no_install,
                 "host_setup": false,
                 "generated_at": generated_at,
+            "context_output": config.brief.as_ref().map(|_| "docs/AI_CONTEXT.md"),
             }))?
         );
         return Ok(());
@@ -329,6 +337,7 @@ pub fn run(mut config: Config) -> Result<()> {
     let oauth_id_c = oauth_client_id.clone();
     let pm_c = pm_resolved.clone();
     let extras_c = extras.clone();
+    let brief = config.brief.clone();
 
     if let Some(parent) = output
         .parent()
@@ -403,6 +412,14 @@ pub fn run(mut config: Config) -> Result<()> {
             write_env_file(&output_c, &auth_module_c, oauth_id_c.as_deref())?;
             write_manifest(&output_c, &token_map_c, &auth_module_c, &ui_module_c)?;
             recipe.write(&output_c)?;
+            if let Some(brief) = brief {
+                crate::context::run_silent(crate::context::Config {
+                    project: output_c.clone(),
+                    brief,
+                    output: PathBuf::from("docs/AI_CONTEXT.md"),
+                    dry_run: false,
+                })?;
+            }
             tx.send(WorkerMsg::StepDone(6)).ok();
 
             if !no_git {
@@ -784,7 +801,7 @@ fn resolve_template(explicit: Option<PathBuf>, license_key: Option<&str>) -> Res
     anyhow::bail!(
         "No template directory found.\n\
          Options:\n  \
-         1. Set CRABYARD_LICENSE_KEY env var (downloads from crabyard-api-production.up.railway.app)\n  \
+         1. Set CRABYARD_LICENSE_KEY env var (downloads from api.crabyard.com)\n  \
          2. Set CRABYARD_TEMPLATE env var: export CRABYARD_TEMPLATE=/path/to/template\n  \
          3. Use --template flag: crabyard new --template /path/to/template"
     )

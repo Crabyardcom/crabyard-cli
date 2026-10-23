@@ -1,10 +1,10 @@
 [package]
 name = "crabyard"
-version = "1.7.1"
+version = "1.8.0"
 edition = "2021"
 description = "Crabyard — Rust Tauri desktop app starter generator"
 repository = "https://github.com/Crabyardcom/crabyard-cli"
-homepage = "https://crabyard-web-production.up.railway.app"
+homepage = "https://crabyard.com"
 
 [[bin]]
 name = "crabyard"
@@ -19,6 +19,9 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
+ignore = "0.4"
+serde_yaml_ng = "0.10"
+json5 = "0.4"
 toml = "0.8"
 toml_edit = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

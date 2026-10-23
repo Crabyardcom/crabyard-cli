@@ -784,7 +784,7 @@ fn resolve_template(explicit: Option<PathBuf>, license_key: Option<&str>) -> Res
     anyhow::bail!(
         "No template directory found.\n\
          Options:\n  \
-         1. Set CRABYARD_LICENSE_KEY env var (downloads from crabyard.dev)\n  \
+         1. Set CRABYARD_LICENSE_KEY env var (downloads from crabyard-api-production.up.railway.app)\n  \
          2. Set CRABYARD_TEMPLATE env var: export CRABYARD_TEMPLATE=/path/to/template\n  \
          3. Use --template flag: crabyard new --template /path/to/template"
     )

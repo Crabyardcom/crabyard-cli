@@ -8,7 +8,7 @@ use flate2::read::GzDecoder;
 use serde::Deserialize;
 
 const API_BASE: &str = "https://crabyard-api-production.up.railway.app";
-const TEMPLATE_VERSION: &str = env!("CARGO_PKG_VERSION");
+const TEMPLATE_VERSION: &str = "1.7.0";
 const MAX_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TEMPLATE_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -25,8 +25,6 @@ struct ValidateResponse {
     valid: bool,
     #[serde(default)]
     message: Option<String>,
-    #[serde(default)]
-    download_url: Option<String>,
 }
 
 pub fn validate_and_resolve(license_key: &str) -> Result<PathBuf> {
@@ -36,11 +34,8 @@ pub fn validate_and_resolve(license_key: &str) -> Result<PathBuf> {
         return Ok(cached);
     }
 
-    let resp = validate_key(license_key)?;
-
-    let download_url = resp
-        .download_url
-        .unwrap_or_else(|| format!("{API_BASE}/template/{TEMPLATE_VERSION}"));
+    validate_key(license_key)?;
+    let download_url = format!("{API_BASE}/template/{TEMPLATE_VERSION}");
 
     download_template(&download_url, license_key, &cached)?;
     Ok(cached)
@@ -55,7 +50,7 @@ pub fn refresh_cache(license_key: &str) -> Result<PathBuf> {
     validate_and_resolve(license_key)
 }
 
-fn validate_key(license_key: &str) -> Result<ValidateResponse> {
+fn validate_key(license_key: &str) -> Result<()> {
     let resp = client()?
         .post(format!("{API_BASE}/license/validate"))
         .json(&serde_json::json!({ "key": license_key }))
@@ -65,7 +60,9 @@ fn validate_key(license_key: &str) -> Result<ValidateResponse> {
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED
         || resp.status() == reqwest::StatusCode::FORBIDDEN
     {
-        anyhow::bail!("Invalid license key. Purchase one at https://crabyard.dev");
+        anyhow::bail!(
+            "Invalid license key. Purchase one at https://crabyard-web-production.up.railway.app"
+        );
     }
 
     if !resp.status().is_success() {
@@ -84,7 +81,7 @@ fn validate_key(license_key: &str) -> Result<ValidateResponse> {
         anyhow::bail!("License invalid: {msg}");
     }
 
-    Ok(body)
+    Ok(())
 }
 
 fn download_template(url: &str, license_key: &str, dest: &Path) -> Result<()> {

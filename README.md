@@ -12,7 +12,7 @@ crabyard new "My App" --preset desktop --yes
 
 The wizard selects authentication (`none`, `github`, `google`), UI (`minimal`, `shadcn`, `daisyui`, `tesign`), package manager, app metadata, and optional Tauri plugins. Normal generation installs frontend dependencies and prepares the local toolchain.
 
-Download the platform installer from [Crabyard](https://crabyard.dev), or build locally with `cargo install --path .`. Installers verify SHA256 sidecars published with CLI releases.
+Download the platform installer from [Crabyard](https://crabyard-web-production.up.railway.app), or build locally with `cargo install --path .`. Installers verify SHA256 sidecars published with CLI releases.
 
 ## Reproducible generation
 

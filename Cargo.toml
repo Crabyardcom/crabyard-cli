@@ -1,10 +1,10 @@
 [package]
 name = "crabyard"
-version = "1.7.0"
+version = "1.7.1"
 edition = "2021"
 description = "Crabyard — Rust Tauri desktop app starter generator"
 repository = "https://github.com/Crabyardcom/crabyard-cli"
-homepage = "https://crabyard.dev"
+homepage = "https://crabyard-web-production.up.railway.app"
 
 [[bin]]
 name = "crabyard"

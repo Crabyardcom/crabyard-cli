@@ -28,9 +28,13 @@ Deploy from a service repository with explicit project, environment, and service
 ## CLI releases
 
 1. Update `Cargo.toml` and `Cargo.lock`; run the CLI checks.
-2. Publish a compatible template version through `crabyard-templates`.
+2. Confirm the supported `TEMPLATE_VERSION` in `src/license.rs` is published through `crabyard-templates`.
 3. Tag the CLI commit `vX.Y.Z` and push the tag.
 4. The release workflow tests and builds five targets, publishes each archive with its `.sha256` sidecar, and creates `SHA256SUMS`.
 5. The API proxies public release assets from `Crabyardcom/crabyard-cli`. Installers reject checksum mismatches.
 
 The tag must match `Cargo.toml`. CI uses a narrowly scoped `GITHUB_TOKEN` with `contents: write` for release creation, as described in [GitHub's permissions reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+
+CLI and template versions are independent. CLI 1.7.1 downloads template 1.7.0. CLI patches keep the tested template version; they do not require a duplicate template release. Change `TEMPLATE_VERSION` only when adopting a compatible, published template. Cache directories and licensed download requests use that supported template version.
+
+To retry packaging an existing tag without moving it, dispatch the release workflow from `main` with its `tag` input. The workflow checks out that immutable tag and validates its Cargo version before publishing.

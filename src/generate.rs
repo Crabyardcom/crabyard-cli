@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -16,7 +17,10 @@ struct CleanupGuard {
 
 impl CleanupGuard {
     fn new(path: PathBuf) -> Self {
-        Self { path, disarmed: false }
+        Self {
+            path,
+            disarmed: false,
+        }
     }
 
     fn disarm(&mut self) {
@@ -43,17 +47,27 @@ fn ensure_stdin_tty() {
     }
     // Prefer the inherited pty slave fd so that macOS kqueue works.
     if std::io::stdout().is_terminal() {
-        unsafe { libc::dup2(libc::STDOUT_FILENO, libc::STDIN_FILENO); }
+        unsafe {
+            libc::dup2(libc::STDOUT_FILENO, libc::STDIN_FILENO);
+        }
         return;
     }
     if std::io::stderr().is_terminal() {
-        unsafe { libc::dup2(libc::STDERR_FILENO, libc::STDIN_FILENO); }
+        unsafe {
+            libc::dup2(libc::STDERR_FILENO, libc::STDIN_FILENO);
+        }
         return;
     }
     // Last resort: open /dev/tty directly (works on Linux, unreliable on macOS).
-    if let Ok(tty) = fs::OpenOptions::new().read(true).write(true).open("/dev/tty") {
+    if let Ok(tty) = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
         use std::os::unix::io::AsRawFd;
-        unsafe { libc::dup2(tty.as_raw_fd(), libc::STDIN_FILENO); }
+        unsafe {
+            libc::dup2(tty.as_raw_fd(), libc::STDIN_FILENO);
+        }
     }
 }
 
@@ -61,12 +75,13 @@ fn ensure_stdin_tty() {
 fn ensure_stdin_tty() {}
 
 use crate::config;
+use crate::license;
 use crate::overlay;
+use crate::recipe::{Preset, Recipe};
 use crate::tokens::{self, TokenMap};
 use crate::tui::banner;
 use crate::tui::generation::{Step, StepStatus, WorkerMsg};
 use crate::tui::wizard;
-use crate::license;
 
 pub struct Config {
     pub app_name: Option<String>,
@@ -85,10 +100,24 @@ pub struct Config {
     pub pm: Option<String>,
     pub license_key: Option<String>,
     pub extras: Vec<String>,
+    pub recipe: Option<PathBuf>,
+    pub preset: Option<Preset>,
+    pub dry_run: bool,
 }
 
 pub fn run(mut config: Config) -> Result<()> {
-    ensure_stdin_tty();
+    let generated_at = unix_timestamp()?;
+    if let Some(path) = &config.recipe {
+        Recipe::read(path)?.apply(&mut config);
+    }
+    if let Some(preset) = config.preset {
+        let (auth, ui, extras) = preset.defaults();
+        config.auth = config.auth.or_else(|| Some(auth.into()));
+        config.ui = config.ui.or_else(|| Some(ui.into()));
+        if config.extras.is_empty() && config.recipe.is_none() {
+            config.extras = extras.iter().map(|extra| (*extra).into()).collect();
+        }
+    }
 
     let rc = config::load();
     config.pm = config.pm.or(rc.defaults.pm);
@@ -97,45 +126,20 @@ pub fn run(mut config: Config) -> Result<()> {
     config.author = config.author.or(rc.defaults.author);
     config.license_key = config.license_key.or(rc.defaults.license_key);
 
-    println!();
-    banner::print_inline_banner();
-    banner::print_inline_separator();
-    println!();
-
-    crate::doctor::ensure_rust_version()?;
-    crate::doctor::ensure_linux_deps()?;
-    crate::doctor::ensure_xcode_clt()?;
-    crate::doctor::ensure_msvc()?;
-    crate::doctor::ensure_webview2()?;
-
     let non_interactive = config.yes
+        || config.dry_run
+        || config.recipe.is_some()
+        || config.preset.is_some()
         || (config.app_name.is_some()
             && config.auth.is_some()
             && config.ui.is_some()
             && config.pm.is_some());
-
-    let (pm_resolved, auth_module, ui_module, extras, token_map, oauth_client_id);
-
-    if non_interactive {
-        let pm = config.pm.as_deref().unwrap_or("bun").to_string();
-        pm_resolved = crate::doctor::ensure_package_manager(Some(&pm))?;
-        auth_module = config.auth.clone().unwrap_or_else(|| "github".into());
-        ui_module = config.ui.clone().unwrap_or_else(|| "shadcn".into());
-        extras = config.extras.clone();
-        oauth_client_id = None;
-        token_map = build_token_map(
-            &config,
-            config.app_name.as_deref().unwrap_or("My App"),
-            config.slug.as_deref(),
-            config.bundle_id.as_deref(),
-            config.app_version.as_deref().unwrap_or("0.1.0"),
-            config.author.as_deref().unwrap_or(""),
-            config.description.as_deref().unwrap_or(""),
-            &auth_module,
-            &ui_module,
-            &pm_resolved,
-        );
-    } else {
+    Recipe::resolve(&config).validate()?;
+    if !non_interactive {
+        ensure_stdin_tty();
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            anyhow::bail!("Interactive generation needs a terminal. Use --yes, --recipe, or --preset for headless generation.");
+        }
         let result = wizard::run_wizard(
             config.pm.as_deref(),
             config.auth.as_deref(),
@@ -157,51 +161,93 @@ pub fn run(mut config: Config) -> Result<()> {
             }
         };
 
-        pm_resolved = crate::doctor::ensure_package_manager(Some(&wiz.pm))?;
-        auth_module = wiz.auth;
-        ui_module = wiz.ui;
-        extras = wiz.extras;
-        oauth_client_id = collect_oauth_client_id(&config, &auth_module)?;
-        token_map = build_token_map(
-            &config,
-            &wiz.app_name,
-            Some(wiz.slug.as_str()).filter(|s| !s.is_empty()),
-            Some(wiz.bundle_id.as_str()).filter(|s| !s.is_empty()),
-            &wiz.version,
-            &wiz.author,
-            &wiz.description,
-            &auth_module,
-            &ui_module,
-            &pm_resolved,
-        );
+        config.pm = Some(wiz.pm);
+        config.auth = Some(wiz.auth);
+        config.ui = Some(wiz.ui);
+        config.extras = wiz.extras;
+        config.app_name = Some(wiz.app_name);
+        config.slug = Some(wiz.slug).filter(|s| !s.is_empty());
+        config.bundle_id = Some(wiz.bundle_id).filter(|s| !s.is_empty());
+        config.app_version = Some(wiz.version);
+        config.author = Some(wiz.author);
+        config.description = Some(wiz.description);
     }
 
-    let mut template = resolve_template(config.template.clone(), config.license_key.as_deref())?;
-
-    let auth_dir_check = template.join("auth").join(&auth_module);
-    let ui_dir_check = template.join("ui").join(&ui_module);
-    if (!auth_dir_check.is_dir() || !ui_dir_check.is_dir()) && config.template.is_none() {
-        if let Some(key) = config.license_key.as_deref() {
-            template = license::refresh_cache(key)?;
-        }
-    }
-
-    let slug = token_map["APP_SLUG"].clone();
-
-    let output = config.output.unwrap_or_else(|| PathBuf::from(&slug));
-    if output.exists() {
+    let mut recipe = Recipe::resolve(&config);
+    let mut seen = std::collections::HashSet::new();
+    recipe.extras.retain(|extra| seen.insert(extra.clone()));
+    recipe.validate()?;
+    let output = config
+        .output
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(&recipe.slug));
+    if output.symlink_metadata().is_ok() {
         anyhow::bail!(
             "Output directory '{}' already exists. Choose a different name or remove it first.",
             output.display()
         );
     }
 
-    let mut cleanup_guard = CleanupGuard::new(output.clone());
-
-    let base_dir = template.join("base");
-    if !base_dir.is_dir() {
-        anyhow::bail!("Template missing 'base/' directory at {}", base_dir.display());
+    if config.dry_run {
+        if let Some(template) = &config.template {
+            validate_template(template, &recipe.auth, &recipe.ui)?;
+            validate_output_location(template, &output)?;
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "recipe": recipe,
+                "output": output,
+                "template": config.template,
+                "initialize_git": !config.no_git,
+                "install_dependencies": !config.no_install,
+                "host_setup": false,
+                "generated_at": generated_at,
+            }))?
+        );
+        return Ok(());
     }
+
+    let mut template = resolve_template(config.template.clone(), config.license_key.as_deref())?;
+    if (!template.join("auth").join(&recipe.auth).is_dir()
+        || !template.join("ui").join(&recipe.ui).is_dir())
+        && config.template.is_none()
+    {
+        if let Some(key) = config.license_key.as_deref() {
+            template = license::refresh_cache(key)?;
+        }
+    }
+    validate_template(&template, &recipe.auth, &recipe.ui)?;
+    validate_output_location(&template, &output)?;
+    if !non_interactive && !config.no_install {
+        crate::doctor::ensure_rust_version()?;
+        crate::doctor::ensure_linux_deps()?;
+        crate::doctor::ensure_xcode_clt()?;
+        crate::doctor::ensure_msvc()?;
+        crate::doctor::ensure_webview2()?;
+        crate::doctor::ensure_package_manager(Some(&recipe.pm))?;
+    }
+
+    let oauth_client_id = if non_interactive {
+        None
+    } else {
+        collect_oauth_client_id(&config, &recipe.auth)?
+    };
+    let token_map = build_token_map(&recipe, generated_at);
+    let slug = recipe.slug.clone();
+    let auth_module = recipe.auth.clone();
+    let ui_module = recipe.ui.clone();
+    let pm_resolved = recipe.pm.clone();
+    let extras = recipe.extras.clone();
+    let base_dir = template.join("base");
+    let auth_config =
+        overlay::load_module_config(&template.join("auth").join(&auth_module).join("module.json"))?;
+    let ui_config =
+        overlay::load_module_config(&template.join("ui").join(&ui_module).join("module.json"))?;
+
+    println!();
+    banner::print_inline_banner();
+    banner::print_inline_separator();
 
     println!(
         "\n  {} auth={}, ui={}, pm={}, extras={}",
@@ -218,16 +264,46 @@ pub fn run(mut config: Config) -> Result<()> {
     let has_extras = !extras.is_empty();
 
     let mut steps = vec![
-        Step { label: "Copy base template".into(), status: StepStatus::Running },
-        Step { label: format!("Apply auth/{auth_module} overlay"), status: StepStatus::Pending },
-        Step { label: format!("Apply ui/{ui_module} overlay"), status: StepStatus::Pending },
-        Step { label: "Process tokens & markers".into(), status: StepStatus::Pending },
-        Step { label: "Merge npm dependencies".into(), status: StepStatus::Pending },
-        Step { label: "Apply extras & plugins".into(), status: StepStatus::Pending },
-        Step { label: "Write env & manifest".into(), status: StepStatus::Pending },
-        Step { label: "Initialize git repository".into(), status: StepStatus::Pending },
-        Step { label: "Install frontend dependencies".into(), status: StepStatus::Pending },
-        Step { label: "Generate app icons".into(), status: StepStatus::Pending },
+        Step {
+            label: "Copy base template".into(),
+            status: StepStatus::Running,
+        },
+        Step {
+            label: format!("Apply auth/{auth_module} overlay"),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: format!("Apply ui/{ui_module} overlay"),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Process tokens & markers".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Merge npm dependencies".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Apply extras & plugins".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Write env & manifest".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Initialize git repository".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Install frontend dependencies".into(),
+            status: StepStatus::Pending,
+        },
+        Step {
+            label: "Generate app icons".into(),
+            status: StepStatus::Pending,
+        },
     ];
 
     if !has_extras {
@@ -243,6 +319,8 @@ pub fn run(mut config: Config) -> Result<()> {
 
     let install_ok = Arc::new(AtomicBool::new(!no_install));
     let install_ok_c = install_ok.clone();
+    let hook_errors = Arc::new(Mutex::new(Vec::new()));
+    let hook_errors_c = hook_errors.clone();
 
     let auth_module_c = auth_module.clone();
     let ui_module_c = ui_module.clone();
@@ -252,124 +330,148 @@ pub fn run(mut config: Config) -> Result<()> {
     let pm_c = pm_resolved.clone();
     let extras_c = extras.clone();
 
-    crate::tui::generation::run_generation(&slug, steps, move |tx| {
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    fs::create_dir(&output)
+        .with_context(|| format!("Failed to create output directory {}", output.display()))?;
+    let mut cleanup_guard = CleanupGuard::new(output.clone());
+
+    crate::tui::generation::run_generation(&slug, steps, non_interactive, move |tx| {
         let result = (|| -> anyhow::Result<()> {
-        copy_overlay(&base_dir, &output_c)?;
-        tx.send(WorkerMsg::StepDone(0)).ok();
+            copy_overlay(&base_dir, &output_c)?;
+            tx.send(WorkerMsg::StepDone(0)).ok();
 
-        let auth_dir = template.join("auth").join(&auth_module_c);
-        if !auth_dir.is_dir() {
-            anyhow::bail!(
-                "Auth module '{}' not found in template at {}.\n\
+            let auth_dir = template.join("auth").join(&auth_module_c);
+            if !auth_dir.is_dir() {
+                anyhow::bail!(
+                    "Auth module '{}' not found in template at {}.\n\
                  Delete {} and re-run to refresh the cache.",
-                auth_module_c, auth_dir.display(), template.display()
-            );
-        }
-        copy_overlay(&auth_dir, &output_c)?;
-        tx.send(WorkerMsg::StepDone(1)).ok();
-
-        let ui_dir = template.join("ui").join(&ui_module_c);
-        if !ui_dir.is_dir() {
-            anyhow::bail!(
-                "UI module '{}' not found in template at {}.\n\
-                 Delete {} and re-run to refresh the cache.",
-                ui_module_c, ui_dir.display(), template.display()
-            );
-        }
-        copy_overlay(&ui_dir, &output_c)?;
-        tx.send(WorkerMsg::StepDone(2)).ok();
-
-        let auth_config = overlay::load_module_config(&auth_dir.join("module.json"))?;
-        let ui_config = overlay::load_module_config(&ui_dir.join("module.json"))?;
-
-        let mut all_markers = HashMap::new();
-        for (k, v) in &auth_config.markers {
-            all_markers.insert(k.clone(), v.clone());
-        }
-        for (k, v) in &ui_config.markers {
-            all_markers.insert(k.clone(), v.clone());
-        }
-
-        process_output(&output_c, &all_markers, &token_map_c)?;
-        tx.send(WorkerMsg::StepDone(3)).ok();
-
-        overlay::merge_package_deps(
-            &output_c.join("package.json"),
-            &[&auth_config, &ui_config],
-        )?;
-        tx.send(WorkerMsg::StepDone(4)).ok();
-
-        if !extras_c.is_empty() {
-            for extra in &extras_c {
-                let add_config = crate::add::Config {
-                    feature: extra.clone(),
-                    project: Some(output_c.clone()),
-                    dry_run: false,
-                };
-                crate::add::run_silent(add_config)?;
+                    auth_module_c,
+                    auth_dir.display(),
+                    template.display()
+                );
             }
-            tx.send(WorkerMsg::StepDone(5)).ok();
-        }
+            copy_overlay(&auth_dir, &output_c)?;
+            tx.send(WorkerMsg::StepDone(1)).ok();
 
-        write_env_file(&output_c, &auth_module_c, oauth_id_c.as_deref())?;
-        write_manifest(&output_c, &token_map_c, &auth_module_c, &ui_module_c)?;
-        tx.send(WorkerMsg::StepDone(6)).ok();
+            let ui_dir = template.join("ui").join(&ui_module_c);
+            if !ui_dir.is_dir() {
+                anyhow::bail!(
+                    "UI module '{}' not found in template at {}.\n\
+                 Delete {} and re-run to refresh the cache.",
+                    ui_module_c,
+                    ui_dir.display(),
+                    template.display()
+                );
+            }
+            copy_overlay(&ui_dir, &output_c)?;
+            tx.send(WorkerMsg::StepDone(2)).ok();
 
-        if !no_git {
-            match crate::hooks::git_init(&output_c) {
-                Ok(()) => tx.send(WorkerMsg::StepDone(7)).ok(),
-                Err(e) => tx.send(WorkerMsg::StepFailed(7, e.to_string())).ok(),
-            };
-        }
+            let mut all_markers = HashMap::new();
+            for (k, v) in &auth_config.markers {
+                all_markers.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &ui_config.markers {
+                all_markers.insert(k.clone(), v.clone());
+            }
 
-        if !no_install {
-            match crate::hooks::install_deps(&output_c, &pm_c) {
-                Ok(()) => tx.send(WorkerMsg::StepDone(8)).ok(),
-                Err(e) => {
-                    install_ok_c.store(false, Ordering::Relaxed);
-                    tx.send(WorkerMsg::StepFailed(8, e.to_string())).ok()
+            process_output(&output_c, &all_markers, &token_map_c)?;
+            tx.send(WorkerMsg::StepDone(3)).ok();
+
+            overlay::merge_package_deps(
+                &output_c.join("package.json"),
+                &[&auth_config, &ui_config],
+            )?;
+            tx.send(WorkerMsg::StepDone(4)).ok();
+
+            if !extras_c.is_empty() {
+                for extra in &extras_c {
+                    let add_config = crate::add::Config {
+                        feature: extra.clone(),
+                        project: Some(output_c.clone()),
+                        dry_run: false,
+                    };
+                    crate::add::run_silent(add_config)?;
                 }
-            };
+                tx.send(WorkerMsg::StepDone(5)).ok();
+            }
 
-            if install_ok_c.load(Ordering::Relaxed) {
-                match crate::hooks::generate_icons(&output_c) {
-                    Ok(()) => tx.send(WorkerMsg::StepDone(9)).ok(),
-                    Err(e) => tx.send(WorkerMsg::StepFailed(9, e.to_string())).ok(),
+            write_env_file(&output_c, &auth_module_c, oauth_id_c.as_deref())?;
+            write_manifest(&output_c, &token_map_c, &auth_module_c, &ui_module_c)?;
+            recipe.write(&output_c)?;
+            tx.send(WorkerMsg::StepDone(6)).ok();
+
+            if !no_git {
+                match crate::hooks::git_init(&output_c) {
+                    Ok(()) => tx.send(WorkerMsg::StepDone(7)).ok(),
+                    Err(e) => {
+                        hook_errors_c.lock().unwrap().push(e.to_string());
+                        tx.send(WorkerMsg::StepFailed(7, e.to_string())).ok()
+                    }
                 };
             }
-        }
 
-        tx.send(WorkerMsg::AllDone).ok();
-        Ok(())
+            if !no_install {
+                match crate::hooks::install_deps(&output_c, &pm_c) {
+                    Ok(()) => tx.send(WorkerMsg::StepDone(8)).ok(),
+                    Err(e) => {
+                        install_ok_c.store(false, Ordering::Relaxed);
+                        hook_errors_c.lock().unwrap().push(e.to_string());
+                        tx.send(WorkerMsg::StepFailed(8, e.to_string())).ok()
+                    }
+                };
+
+                if install_ok_c.load(Ordering::Relaxed) {
+                    match crate::hooks::generate_icons(&output_c) {
+                        Ok(()) => tx.send(WorkerMsg::StepDone(9)).ok(),
+                        Err(e) => {
+                            hook_errors_c.lock().unwrap().push(e.to_string());
+                            tx.send(WorkerMsg::StepFailed(9, e.to_string())).ok()
+                        }
+                    };
+                }
+            }
+
+            tx.send(WorkerMsg::AllDone).ok();
+            Ok(())
         })();
 
         result
     })?;
 
     cleanup_guard.disarm();
+    if non_interactive && !hook_errors.lock().unwrap().is_empty() {
+        anyhow::bail!("Project generated at {}, but setup failed: {}. The scaffold is preserved; install dependencies and retry the failed command.",
+            output.display(), hook_errors.lock().unwrap().join("; "));
+    }
 
-    let needs_oauth = matches!(auth_module.as_str(), "github" | "google") && oauth_client_id.is_none();
+    let needs_oauth =
+        matches!(auth_module.as_str(), "github" | "google") && oauth_client_id.is_none();
 
     println!();
     banner::print_inline_separator();
     println!(
-        " {} ./{slug}",
-        "Project ready at".truecolor(34, 197, 94).bold()
+        " {} {}",
+        "Project ready at".truecolor(34, 197, 94).bold(),
+        output.display()
     );
     println!();
     println!(" {}", "Next steps:".truecolor(228, 228, 231).bold());
-    println!("   {}", format!("cd {slug}").truecolor(161, 161, 170));
+    println!(
+        "   {}",
+        format!("cd \"{}\"", output.display()).truecolor(161, 161, 170)
+    );
     if needs_oauth {
         match auth_module.as_str() {
             "github" => {
+                println!("   {}", "# Set up GitHub OAuth:".truecolor(161, 161, 170));
                 println!(
                     "   {}",
-                    "# Set up GitHub OAuth:".truecolor(161, 161, 170)
-                );
-                println!(
-                    "   {}",
-                    "#   1. Go to https://github.com/settings/developers"
-                        .truecolor(113, 113, 122)
+                    "#   1. Go to https://github.com/settings/developers".truecolor(113, 113, 122)
                 );
                 println!(
                     "   {}",
@@ -378,15 +480,11 @@ pub fn run(mut config: Config) -> Result<()> {
                 );
                 println!(
                     "   {}",
-                    "#   3. Copy Client ID into .env as GITHUB_CLIENT_ID"
-                        .truecolor(113, 113, 122)
+                    "#   3. Copy Client ID into .env as GITHUB_CLIENT_ID".truecolor(113, 113, 122)
                 );
             }
             "google" => {
-                println!(
-                    "   {}",
-                    "# Set up Google OAuth:".truecolor(161, 161, 170)
-                );
+                println!("   {}", "# Set up Google OAuth:".truecolor(161, 161, 170));
                 println!(
                     "   {}",
                     "#   1. Go to https://console.cloud.google.com/apis/credentials"
@@ -394,13 +492,11 @@ pub fn run(mut config: Config) -> Result<()> {
                 );
                 println!(
                     "   {}",
-                    "#   2. Create a Desktop app credential"
-                        .truecolor(113, 113, 122)
+                    "#   2. Create a Desktop app credential".truecolor(113, 113, 122)
                 );
                 println!(
                     "   {}",
-                    "#   3. Copy Client ID into .env as GOOGLE_CLIENT_ID"
-                        .truecolor(113, 113, 122)
+                    "#   3. Copy Client ID into .env as GOOGLE_CLIENT_ID".truecolor(113, 113, 122)
                 );
             }
             _ => {}
@@ -409,14 +505,13 @@ pub fn run(mut config: Config) -> Result<()> {
     if !install_ok.load(Ordering::Relaxed) {
         println!(
             "   {}",
-            format!("{pm_resolved} install").truecolor(6, 182, 212).bold()
+            format!("{pm_resolved} install")
+                .truecolor(6, 182, 212)
+                .bold()
         );
     }
     let dev_cmd = crate::doctor::pm_tauri_dev(&pm_resolved);
-    println!(
-        "   {}",
-        dev_cmd.truecolor(6, 182, 212).bold()
-    );
+    println!("   {}", dev_cmd.truecolor(6, 182, 212).bold());
     banner::print_inline_separator();
     println!();
 
@@ -464,53 +559,95 @@ fn collect_oauth_client_id(config: &Config, auth_module: &str) -> Result<Option<
     }
 }
 
-fn build_token_map(
-    _config: &Config,
-    app_name: &str,
-    slug: Option<&str>,
-    bundle_id: Option<&str>,
-    version: &str,
-    author: &str,
-    description: &str,
-    auth_module: &str,
-    ui_module: &str,
-    pm: &str,
-) -> TokenMap {
-    let app_name = if app_name.is_empty() { "My App" } else { app_name };
-    let app_slug = slug
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .unwrap_or_else(|| tokens::to_slug(app_name));
-    let bundle = bundle_id
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .unwrap_or_else(|| tokens::to_bundle_id(&app_slug));
-    let version = if version.is_empty() { "0.1.0" } else { version };
-    let snake = tokens::to_snake(&app_slug);
-
+fn build_token_map(recipe: &Recipe, generated_at: String) -> TokenMap {
     let mut map = HashMap::new();
-    map.insert("APP_NAME".into(), app_name.to_string());
-    map.insert("APP_SLUG".into(), app_slug);
-    map.insert("APP_SLUG_SNAKE".into(), snake);
-    map.insert("APP_BUNDLE_ID".into(), bundle);
-    map.insert("APP_VERSION".into(), version.to_string());
-    map.insert("APP_DESCRIPTION".into(), description.to_string());
-    map.insert("APP_AUTHOR".into(), author.to_string());
-    map.insert("AUTH_MODULE".into(), auth_module.into());
-    map.insert("UI_MODULE".into(), ui_module.into());
-    map.insert("PACKAGE_MANAGER".into(), pm.into());
-    map.insert("PM_RUN".into(), crate::doctor::pm_run_prefix(pm).into());
-    map.insert("PM_TAURI_DEV".into(), crate::doctor::pm_tauri_dev(pm).into());
+    map.insert("APP_NAME".into(), recipe.app_name.clone());
+    map.insert("APP_SLUG".into(), recipe.slug.clone());
+    map.insert("APP_SLUG_SNAKE".into(), tokens::to_snake(&recipe.slug));
+    map.insert("APP_BUNDLE_ID".into(), recipe.bundle_id.clone());
+    map.insert("APP_VERSION".into(), recipe.app_version.clone());
+    map.insert("APP_DESCRIPTION".into(), recipe.description.clone());
+    map.insert("APP_AUTHOR".into(), recipe.author.clone());
+    map.insert("AUTH_MODULE".into(), recipe.auth.clone());
+    map.insert("UI_MODULE".into(), recipe.ui.clone());
+    map.insert("PACKAGE_MANAGER".into(), recipe.pm.clone());
+    map.insert(
+        "PM_RUN".into(),
+        crate::doctor::pm_run_prefix(&recipe.pm).into(),
+    );
+    map.insert(
+        "PM_TAURI_DEV".into(),
+        crate::doctor::pm_tauri_dev(&recipe.pm).into(),
+    );
     map.insert("CRABYARD_VERSION".into(), env!("GIT_VERSION").into());
-    map.insert("GENERATED_AT".into(), unix_timestamp());
+    map.insert("GENERATED_AT".into(), generated_at);
 
     map
+}
+
+fn validate_template(template: &Path, auth: &str, ui: &str) -> Result<()> {
+    for module in [
+        PathBuf::from("base"),
+        PathBuf::from("auth").join(auth),
+        PathBuf::from("ui").join(ui),
+    ] {
+        let path = template.join(module);
+        if !path.is_dir() {
+            anyhow::bail!("Template module not found: {}", path.display());
+        }
+        overlay::load_module_config(&path.join("module.json"))?;
+        for entry in WalkDir::new(&path).into_iter().filter_entry(|entry| {
+            entry
+                .path()
+                .strip_prefix(&path)
+                .map_or(true, |rel| !tokens::should_skip_path(rel))
+        }) {
+            let entry =
+                entry.with_context(|| format!("Cannot read template {}", path.display()))?;
+            if entry.file_type().is_symlink() {
+                anyhow::bail!(
+                    "Template contains a symbolic link: {}",
+                    entry.path().display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_output_location(template: &Path, output: &Path) -> Result<()> {
+    let template = fs::canonicalize(template)?;
+    let absolute = std::env::current_dir()?.join(output);
+    for ancestor in absolute.ancestors() {
+        if let Ok(mut resolved) = fs::canonicalize(ancestor) {
+            for component in absolute.strip_prefix(ancestor)?.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        resolved.pop();
+                    }
+                    std::path::Component::CurDir => {}
+                    _ => resolved.push(component.as_os_str()),
+                }
+            }
+            if resolved.starts_with(&template) {
+                anyhow::bail!("Output directory must be outside the template directory");
+            }
+            return Ok(());
+        }
+    }
+    anyhow::bail!("Cannot resolve output directory {}", output.display())
 }
 
 /// Copy an overlay directory to output, overwriting existing files.
 /// Skips module.json (consumed separately by the marker/deps system).
 fn copy_overlay(source: &Path, output: &Path) -> Result<()> {
-    for entry in WalkDir::new(source).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(source).into_iter().filter_entry(|entry| {
+        entry
+            .path()
+            .strip_prefix(source)
+            .map_or(true, |rel| !tokens::should_skip_path(rel))
+    }) {
+        let entry = entry.with_context(|| format!("Cannot read template {}", source.display()))?;
         let src = entry.path();
         let rel = src.strip_prefix(source)?;
 
@@ -518,7 +655,11 @@ fn copy_overlay(source: &Path, output: &Path) -> Result<()> {
             continue;
         }
 
-        if rel.file_name().map(|f| f == "module.json" || f == ".sync-state.json").unwrap_or(false) {
+        if rel
+            .file_name()
+            .map(|f| f == "module.json" || f == ".sync-state.json")
+            .unwrap_or(false)
+        {
             continue;
         }
 
@@ -534,17 +675,22 @@ fn copy_overlay(source: &Path, output: &Path) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        fs::copy(src, &dst)
-            .with_context(|| format!("Failed to copy: {}", src.display()))?;
+        fs::copy(src, &dst).with_context(|| format!("Failed to copy: {}", src.display()))?;
     }
     Ok(())
 }
 
 /// Walk all files in the output directory, applying markers and token replacement.
-fn process_output(output: &Path, markers: &HashMap<String, String>, token_map: &TokenMap) -> Result<usize> {
+fn process_output(
+    output: &Path,
+    markers: &HashMap<String, String>,
+    token_map: &TokenMap,
+) -> Result<usize> {
     let mut count = 0usize;
 
-    for entry in WalkDir::new(output).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(output) {
+        let entry =
+            entry.with_context(|| format!("Cannot read generated project {}", output.display()))?;
         let path = entry.path();
         if !entry.file_type().is_file() || tokens::is_binary_path(path) {
             continue;
@@ -556,7 +702,7 @@ fn process_output(output: &Path, markers: &HashMap<String, String>, token_map: &
         };
 
         let processed = overlay::apply_markers(&content, markers);
-        let processed = tokens::replace(&processed, token_map);
+        let processed = tokens::replace_for_path(&processed, token_map, path);
 
         if processed != content {
             fs::write(path, &processed)
@@ -588,7 +734,6 @@ fn write_env_file(output: &Path, auth_module: &str, client_id: Option<&str>) -> 
                 _ => content,
             };
             fs::write(&env, content)?;
-        } else {
         }
     }
     Ok(())
@@ -607,7 +752,10 @@ fn write_manifest(output: &Path, token_map: &TokenMap, auth: &str, ui: &str) -> 
     Ok(())
 }
 
-pub fn resolve_template_path(explicit: Option<PathBuf>, license_key: Option<&str>) -> Result<PathBuf> {
+pub fn resolve_template_path(
+    explicit: Option<PathBuf>,
+    license_key: Option<&str>,
+) -> Result<PathBuf> {
     resolve_template(explicit, license_key)
 }
 
@@ -642,10 +790,20 @@ fn resolve_template(explicit: Option<PathBuf>, license_key: Option<&str>) -> Res
     )
 }
 
-fn unix_timestamp() -> String {
+fn unix_timestamp() -> Result<String> {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
+    match std::env::var("SOURCE_DATE_EPOCH") {
+        Ok(value) => {
+            return Ok(value
+                .parse::<u64>()
+                .context("SOURCE_DATE_EPOCH must be a non-negative Unix timestamp")?
+                .to_string())
+        }
+        Err(std::env::VarError::NotPresent) => {}
+        Err(error) => return Err(error).context("Invalid SOURCE_DATE_EPOCH"),
+    }
+    Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".into())
+        .unwrap_or_else(|_| "0".into()))
 }

@@ -135,9 +135,10 @@ impl TextInputState {
                 let (before, after) = display_val.split_at(field.cursor.min(display_val.len()));
                 let cursor_char = if cursor_visible { "▎" } else { " " };
 
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", field.label), label_style),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {} ", field.label),
+                    label_style,
+                )]));
                 lines.push(Line::from(vec![
                     Span::raw("    "),
                     Span::styled(before, val_style),
@@ -145,9 +146,10 @@ impl TextInputState {
                     Span::styled(after, val_style),
                 ]));
             } else {
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", field.label), label_style),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {} ", field.label),
+                    label_style,
+                )]));
                 lines.push(Line::from(vec![
                     Span::raw("    "),
                     Span::styled(display_val, val_style),

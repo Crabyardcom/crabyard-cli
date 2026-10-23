@@ -117,7 +117,7 @@ const FEATURES: &[FeatureInfo] = &[
         npm_deps: &[],
         npm_dev_deps: &[],
         cargo_deps: &[],
-        tauri_plugins: &["tauri::tray::TrayIconBuilder::new().build(app)?;return Ok(())"],
+        tauri_plugins: &[],
         capabilities: &[],
     },
     FeatureInfo {
@@ -126,7 +126,7 @@ const FEATURES: &[FeatureInfo] = &[
         npm_deps: &[("@tauri-apps/plugin-updater", "~2")],
         npm_dev_deps: &[],
         cargo_deps: &[("tauri-plugin-updater", "\"2\"")],
-        tauri_plugins: &["tauri_plugin_updater"],
+        tauri_plugins: &["tauri_plugin_updater::Builder::new().build()"],
         capabilities: &["updater:default"],
     },
     FeatureInfo {
@@ -248,6 +248,15 @@ const FEATURES: &[FeatureInfo] = &[
     },
 ];
 
+pub fn validate_feature(name: &str) -> Result<()> {
+    if !FEATURES.iter().any(|feature| feature.name == name) {
+        anyhow::bail!(
+            "Unknown feature '{name}'. Run `crabyard add list` to see available features."
+        );
+    }
+    Ok(())
+}
+
 pub fn run(config: Config) -> Result<()> {
     if config.feature == "list" {
         print_available_features();
@@ -264,9 +273,7 @@ pub fn run(config: Config) -> Result<()> {
             )
         })?;
 
-    let project = config
-        .project
-        .unwrap_or_else(|| PathBuf::from("."));
+    let project = config.project.unwrap_or_else(|| PathBuf::from("."));
 
     if !project.join("package.json").exists() || !project.join("src-tauri").exists() {
         anyhow::bail!(
@@ -284,16 +291,32 @@ pub fn run(config: Config) -> Result<()> {
     println!();
 
     if config.dry_run {
-        println!("  {} (dry run — no files modified)", "Preview:".truecolor(161, 161, 170));
+        println!(
+            "  {} (dry run — no files modified)",
+            "Preview:".truecolor(161, 161, 170)
+        );
         println!();
         print_plan(feature);
         return Ok(());
     }
 
+    let recipe_path = project.join("crabyard.recipe.toml");
+    let mut recipe = if recipe_path.exists() {
+        Some(crate::recipe::Recipe::read(&recipe_path)?)
+    } else {
+        None
+    };
+
     add_npm_deps(&project, feature)?;
     add_cargo_deps(&project, feature)?;
     add_tauri_plugin(&project, feature)?;
     add_capabilities(&project, feature)?;
+    if let Some(recipe) = &mut recipe {
+        if !recipe.extras.iter().any(|extra| extra == feature.name) {
+            recipe.extras.push(feature.name.into());
+            recipe.write(&project)?;
+        }
+    }
 
     println!();
     println!(
@@ -310,8 +333,7 @@ pub fn run(config: Config) -> Result<()> {
         );
         println!(
             "  {}",
-            format!("  import {{ ... }} from \"{}\"", first_dep.0)
-                .truecolor(228, 228, 231)
+            format!("  import {{ ... }} from \"{}\"", first_dep.0).truecolor(228, 228, 231)
         );
     } else {
         println!(
@@ -326,7 +348,10 @@ pub fn run(config: Config) -> Result<()> {
 
 fn print_available_features() {
     println!();
-    println!("  {} ", "Available features:".truecolor(161, 161, 170).bold());
+    println!(
+        "  {} ",
+        "Available features:".truecolor(161, 161, 170).bold()
+    );
     println!();
     for f in FEATURES {
         println!(
@@ -344,6 +369,10 @@ fn print_available_features() {
 }
 
 fn print_plan(feature: &FeatureInfo) {
+    if feature.name == "tray" {
+        println!("  Enable tauri/tray-icon in Cargo.toml");
+        println!("  Add a system tray with Show and Quit actions inside the app setup callback");
+    }
     if !feature.npm_deps.is_empty() || !feature.npm_dev_deps.is_empty() {
         println!("  npm dependencies:");
         for (name, ver) in feature.npm_deps {
@@ -362,7 +391,7 @@ fn print_plan(feature: &FeatureInfo) {
     if !feature.tauri_plugins.is_empty() {
         println!("  Tauri plugins (lib.rs):");
         for p in feature.tauri_plugins {
-            println!("    + .plugin({}::init())", p);
+            println!("    + {}", plugin_call(p));
         }
     }
     if !feature.capabilities.is_empty() {
@@ -378,9 +407,7 @@ pub fn run_silent(config: Config) -> Result<()> {
     let feature = FEATURES
         .iter()
         .find(|f| f.name == config.feature)
-        .ok_or_else(|| {
-            anyhow::anyhow!("Unknown feature '{}'", config.feature)
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("Unknown feature '{}'", config.feature))?;
 
     let project = config.project.unwrap_or_else(|| PathBuf::from("."));
 
@@ -402,13 +429,17 @@ fn add_npm_deps_silent(project: &Path, feature: &FeatureInfo) -> Result<()> {
         serde_json::from_str(&content).context("Failed to parse package.json")?;
     let obj = pkg.as_object_mut().unwrap();
     if !feature.npm_deps.is_empty() {
-        let deps = obj.entry("dependencies").or_insert_with(|| serde_json::json!({}));
+        let deps = obj
+            .entry("dependencies")
+            .or_insert_with(|| serde_json::json!({}));
         for (name, ver) in feature.npm_deps {
             deps[*name] = serde_json::Value::String(ver.to_string());
         }
     }
     if !feature.npm_dev_deps.is_empty() {
-        let deps = obj.entry("devDependencies").or_insert_with(|| serde_json::json!({}));
+        let deps = obj
+            .entry("devDependencies")
+            .or_insert_with(|| serde_json::json!({}));
         for (name, ver) in feature.npm_dev_deps {
             deps[*name] = serde_json::Value::String(ver.to_string());
         }
@@ -462,24 +493,15 @@ fn add_cargo_deps_silent(project: &Path, feature: &FeatureInfo) -> Result<()> {
 }
 
 fn add_tauri_plugin_silent(project: &Path, feature: &FeatureInfo) -> Result<()> {
+    if feature.name == "tray" {
+        return add_tray(project);
+    }
     if feature.tauri_plugins.is_empty() {
         return Ok(());
     }
     let lib_path = project.join("src-tauri").join("src").join("lib.rs");
-    let mut content = fs::read_to_string(&lib_path).context("Failed to read lib.rs")?;
-    for plugin in feature.tauri_plugins {
-        let init_call = if plugin.contains("::init(") || plugin.contains("::new(") || plugin.contains("::Builder") {
-            format!(".plugin({})", plugin)
-        } else {
-            format!(".plugin({}::init())", plugin)
-        };
-        if content.contains(plugin) {
-            continue;
-        }
-        if let Some(pos) = content.find(".setup(") {
-            content.insert_str(pos, &format!("{}\n        ", init_call));
-        }
-    }
+    let content = fs::read_to_string(&lib_path).context("Failed to read lib.rs")?;
+    let content = register_plugins(content, feature)?;
     fs::write(&lib_path, content).context("Failed to write lib.rs")?;
     Ok(())
 }
@@ -488,8 +510,12 @@ fn add_capabilities_silent(project: &Path, feature: &FeatureInfo) -> Result<()> 
     if feature.capabilities.is_empty() {
         return Ok(());
     }
-    let cap_path = project.join("src-tauri").join("capabilities").join("default.json");
-    let content = fs::read_to_string(&cap_path).context("Failed to read capabilities/default.json")?;
+    let cap_path = project
+        .join("src-tauri")
+        .join("capabilities")
+        .join("default.json");
+    let content =
+        fs::read_to_string(&cap_path).context("Failed to read capabilities/default.json")?;
     let mut cap: serde_json::Value =
         serde_json::from_str(&content).context("Failed to parse capabilities/default.json")?;
     let permissions = cap
@@ -548,8 +574,7 @@ fn add_cargo_deps(project: &Path, feature: &FeatureInfo) -> Result<()> {
     }
 
     let cargo_path = project.join("src-tauri").join("Cargo.toml");
-    let mut content =
-        fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
+    let mut content = fs::read_to_string(&cargo_path).context("Failed to read Cargo.toml")?;
 
     for (name, ver) in feature.cargo_deps {
         if content.contains(&format!("{name} =")) || content.contains(&format!("{name}=")) {
@@ -574,38 +599,98 @@ fn add_cargo_deps(project: &Path, feature: &FeatureInfo) -> Result<()> {
 }
 
 fn add_tauri_plugin(project: &Path, feature: &FeatureInfo) -> Result<()> {
-    if feature.tauri_plugins.is_empty() {
+    if feature.tauri_plugins.is_empty() && feature.name != "tray" {
         return Ok(());
     }
+    add_tauri_plugin_silent(project, feature)?;
+    println!("    {} lib.rs", "✓".truecolor(34, 197, 94));
+    Ok(())
+}
 
-    let lib_path = project.join("src-tauri").join("src").join("lib.rs");
-    let mut content =
-        fs::read_to_string(&lib_path).context("Failed to read lib.rs")?;
+fn plugin_call(plugin: &str) -> String {
+    if plugin.ends_with(')') {
+        format!(".plugin({plugin})")
+    } else {
+        format!(".plugin({plugin}::init())")
+    }
+}
 
+fn register_plugins(mut content: String, feature: &FeatureInfo) -> Result<String> {
     for plugin in feature.tauri_plugins {
-        let init_call = if plugin.contains("::init(") || plugin.contains("::new(") || plugin.contains("::Builder") {
-            format!(".plugin({})", plugin)
-        } else {
-            format!(".plugin({}::init())", plugin)
-        };
-
-        if content.contains(plugin) {
-            println!(
-                "    {} {} already in lib.rs",
-                "–".truecolor(161, 161, 170),
-                plugin
-            );
+        let crate_name = plugin.split("::").next().unwrap_or(plugin);
+        if content.contains(&format!("{crate_name}::")) {
             continue;
         }
-
-        // Insert plugin registration before .setup(
-        if let Some(pos) = content.find(".setup(") {
-            content.insert_str(pos, &format!("{}\n        ", init_call));
-        }
+        let pos = content
+            .find(".setup(")
+            .or_else(|| content.find(".invoke_handler("))
+            .or_else(|| content.find(".run(tauri::generate_context!"))
+            .context("Cannot find a Tauri builder insertion point in src-tauri/src/lib.rs")?;
+        content.insert_str(pos, &format!("{}\n        ", plugin_call(plugin)));
     }
+    Ok(content)
+}
 
-    fs::write(&lib_path, content).context("Failed to write lib.rs")?;
-    println!("    {} lib.rs", "✓".truecolor(34, 197, 94));
+fn add_tray(project: &Path) -> Result<()> {
+    let lib_path = project.join("src-tauri/src/lib.rs");
+    let mut source = fs::read_to_string(&lib_path).context("Failed to read lib.rs")?;
+    if !source.contains("tauri::tray::TrayIconBuilder") {
+        let setup = ".setup(|app| {";
+        let pos = source
+            .find(setup)
+            .context("Tray integration needs a .setup(|app| { callback in src-tauri/src/lib.rs")?
+            + setup.len();
+        source.insert_str(pos, r#"
+            let show_item = tauri::menu::MenuItem::with_id(app, "crabyard-show", "Show", true, None::<&str>)?;
+            let quit_item = tauri::menu::MenuItem::with_id(app, "crabyard-quit", "Quit", true, None::<&str>)?;
+            let tray_menu = tauri::menu::Menu::with_items(app, &[&show_item, &quit_item])?;
+            let mut tray = tauri::tray::TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "crabyard-show" => {
+                        if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "crabyard-quit" => app.exit(0),
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
+"#);
+    }
+    let cargo_path = project.join("src-tauri/Cargo.toml");
+    let mut cargo = fs::read_to_string(&cargo_path)?.parse::<toml_edit::DocumentMut>()?;
+    let tauri = cargo
+        .get_mut("dependencies")
+        .and_then(|deps| deps.get_mut("tauri"))
+        .context("Tray integration requires a tauri dependency in src-tauri/Cargo.toml")?;
+    if let Some(version) = tauri.as_str().map(str::to_string) {
+        let mut table = toml_edit::InlineTable::new();
+        table.insert("version", version.into());
+        *tauri = toml_edit::Item::Value(table.into());
+    }
+    let table = tauri
+        .as_table_like_mut()
+        .context("Unsupported tauri dependency format")?;
+    if table.get("features").is_none() {
+        table.insert("features", toml_edit::value(toml_edit::Array::new()));
+    }
+    let features = table
+        .get_mut("features")
+        .and_then(toml_edit::Item::as_array_mut)
+        .context("tauri dependency features must be an array")?;
+    if !features
+        .iter()
+        .any(|feature| feature.as_str() == Some("tray-icon"))
+    {
+        features.push("tray-icon");
+    }
+    fs::write(&cargo_path, cargo.to_string())?;
+    fs::write(&lib_path, source)?;
     Ok(())
 }
 
@@ -637,6 +722,9 @@ fn add_capabilities(project: &Path, feature: &FeatureInfo) -> Result<()> {
 
     let output = serde_json::to_string_pretty(&cap)?;
     fs::write(&cap_path, output).context("Failed to write capabilities/default.json")?;
-    println!("    {} capabilities/default.json", "✓".truecolor(34, 197, 94));
+    println!(
+        "    {} capabilities/default.json",
+        "✓".truecolor(34, 197, 94)
+    );
     Ok(())
 }

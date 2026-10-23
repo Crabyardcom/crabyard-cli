@@ -164,9 +164,9 @@ fn rustup_update() -> Result<()> {
     let new_v = get_version("rustc", &["--version"])
         .ok_or_else(|| anyhow::anyhow!("rustc not found after update — check your PATH"))?;
 
-    if parse_semver(&new_v).map_or(true, |(maj, min, _)| !(maj >= 1 && min >= 88)) {
+    if parse_semver(&new_v).is_none_or(|version| version < (1, 90, 0)) {
         anyhow::bail!(
-            "Rust {new_v} is still below 1.88.0 after update. Check your active toolchain."
+            "Rust {new_v} is still below 1.90.0 after update. Check your active toolchain."
         );
     }
 
@@ -177,9 +177,7 @@ fn rustup_update() -> Result<()> {
 
 pub fn ensure_rust_version() -> Result<()> {
     match get_version("rustc", &["--version"]) {
-        Some(version)
-            if parse_semver(&version).map_or(false, |(maj, min, _)| maj >= 1 && min >= 88) =>
-        {
+        Some(version) if parse_semver(&version).is_some_and(|version| version >= (1, 90, 0)) => {
             return Ok(());
         }
         Some(version) => {
@@ -187,7 +185,7 @@ pub fn ensure_rust_version() -> Result<()> {
                 "\n  {} {}: {}",
                 "!".truecolor(234, 179, 8).bold(),
                 "Rust".truecolor(234, 179, 8),
-                format!("{version} — requires rustc ≥ 1.88.0").truecolor(113, 113, 122),
+                format!("{version} — requires rustc ≥ 1.90.0").truecolor(113, 113, 122),
             );
             if !has_rustup() {
                 install_rustup()?;
@@ -698,53 +696,85 @@ fn linux_install_cmd(distro: &Distro) -> Option<(&'static str, &'static [&'stati
         Distro::Debian => Some((
             "apt-get",
             &[
-                "install", "-y", "pkg-config", "curl",
-                "libwebkit2gtk-4.1-dev", "libjavascriptcoregtk-4.1-dev",
-                "libgtk-3-dev", "libsoup-3.0-dev", "libssl-dev",
+                "install",
+                "-y",
+                "pkg-config",
+                "curl",
+                "libwebkit2gtk-4.1-dev",
+                "libjavascriptcoregtk-4.1-dev",
+                "libgtk-3-dev",
+                "libsoup-3.0-dev",
+                "libssl-dev",
                 "libayatana-appindicator3-dev",
             ],
         )),
         Distro::Fedora => Some((
             "dnf",
             &[
-                "install", "-y", "pkg-config", "curl",
-                "webkit2gtk4.1-devel", "javascriptcoregtk4.1-devel",
-                "gtk3-devel", "libsoup3-devel", "openssl-devel",
+                "install",
+                "-y",
+                "pkg-config",
+                "curl",
+                "webkit2gtk4.1-devel",
+                "javascriptcoregtk4.1-devel",
+                "gtk3-devel",
+                "libsoup3-devel",
+                "openssl-devel",
                 "libappindicator-gtk3-devel",
             ],
         )),
         Distro::Arch => Some((
             "pacman",
             &[
-                "-S", "--needed", "--noconfirm", "pkgconf", "curl",
-                "webkit2gtk-4.1", "gtk3", "libsoup3", "openssl",
+                "-S",
+                "--needed",
+                "--noconfirm",
+                "pkgconf",
+                "curl",
+                "webkit2gtk-4.1",
+                "gtk3",
+                "libsoup3",
+                "openssl",
                 "libayatana-appindicator",
             ],
         )),
         Distro::Suse => Some((
             "zypper",
             &[
-                "install", "-y", "pkg-config", "curl",
-                "webkit2gtk3-soup2-devel", "gtk3-devel",
-                "libsoup-devel", "libopenssl-devel",
+                "install",
+                "-y",
+                "pkg-config",
+                "curl",
+                "webkit2gtk3-soup2-devel",
+                "gtk3-devel",
+                "libsoup-devel",
+                "libopenssl-devel",
                 "libappindicator3-devel",
             ],
         )),
         Distro::Void => Some((
             "xbps-install",
             &[
-                "-Sy", "pkg-config", "curl",
-                "webkit2gtk-devel", "gtk+3-devel",
-                "libsoup3-devel", "openssl-devel",
+                "-Sy",
+                "pkg-config",
+                "curl",
+                "webkit2gtk-devel",
+                "gtk+3-devel",
+                "libsoup3-devel",
+                "openssl-devel",
                 "libayatana-appindicator-devel",
             ],
         )),
         Distro::Alpine => Some((
             "apk",
             &[
-                "add", "pkgconf", "curl",
-                "webkit2gtk-dev", "gtk+3.0-dev",
-                "libsoup3-dev", "openssl-dev",
+                "add",
+                "pkgconf",
+                "curl",
+                "webkit2gtk-dev",
+                "gtk+3.0-dev",
+                "libsoup3-dev",
+                "openssl-dev",
             ],
         )),
         Distro::Unknown => None,
@@ -900,7 +930,7 @@ fn check_rust() -> Check {
         }
     };
 
-    if parse_semver(&version).map_or(false, |(maj, min, _)| maj >= 1 && min >= 88) {
+    if parse_semver(&version).is_some_and(|version| version >= (1, 90, 0)) {
         return Check {
             name: "Rust",
             status: Status::Ok,
@@ -921,7 +951,7 @@ fn check_rust() -> Check {
             name: "Rust",
             status: Status::Warning,
             detail: format!(
-                "{version} — requires rustc ≥ 1.88.0, install rustup from https://rustup.rs"
+                "{version} — requires rustc ≥ 1.90.0, install rustup from https://rustup.rs"
             ),
         };
     }
@@ -930,7 +960,7 @@ fn check_rust() -> Check {
         "\n  {} {}: {}",
         "!".truecolor(234, 179, 8).bold(),
         "Rust".truecolor(234, 179, 8),
-        format!("{version} — requires rustc ≥ 1.88.0").truecolor(113, 113, 122),
+        format!("{version} — requires rustc ≥ 1.90.0").truecolor(113, 113, 122),
     );
 
     let should_update = Confirm::new()
@@ -943,7 +973,7 @@ fn check_rust() -> Check {
         return Check {
             name: "Rust",
             status: Status::Warning,
-            detail: format!("{version} — requires rustc ≥ 1.88.0, run: rustup update"),
+            detail: format!("{version} — requires rustc ≥ 1.90.0, run: rustup update"),
         };
     }
 
@@ -964,19 +994,15 @@ fn check_rust() -> Check {
     }
 
     match get_version("rustc", &["--version"]) {
-        Some(new_v)
-            if parse_semver(&new_v).map_or(false, |(maj, min, _)| maj >= 1 && min >= 88) =>
-        {
-            Check {
-                name: "Rust",
-                status: Status::Ok,
-                detail: format!("{new_v} (updated)"),
-            }
-        }
+        Some(new_v) if parse_semver(&new_v).is_some_and(|version| version >= (1, 90, 0)) => Check {
+            name: "Rust",
+            status: Status::Ok,
+            detail: format!("{new_v} (updated)"),
+        },
         Some(new_v) => Check {
             name: "Rust",
             status: Status::Warning,
-            detail: format!("{new_v} — still below 1.88.0, check your active toolchain"),
+            detail: format!("{new_v} — still below 1.90.0, check your active toolchain"),
         },
         None => Check {
             name: "Rust",

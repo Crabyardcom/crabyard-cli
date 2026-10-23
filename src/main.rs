@@ -9,6 +9,7 @@ mod license;
 mod overlay;
 mod plugins;
 mod preview;
+mod recipe;
 mod tokens;
 mod tui;
 mod update_ui;
@@ -45,15 +46,15 @@ enum Commands {
         bundle_id: Option<String>,
 
         /// Initial version
-        #[arg(long, default_value = "0.1.0")]
+        #[arg(long)]
         app_version: Option<String>,
 
         /// Author name
-        #[arg(long, default_value = "")]
+        #[arg(long)]
         author: Option<String>,
 
         /// Short description
-        #[arg(long, default_value = "")]
+        #[arg(long)]
         description: Option<String>,
 
         /// Auth module: github, google, or none
@@ -97,6 +98,25 @@ enum Commands {
         /// Extras to include (comma-separated): notifications,clipboard,sql,...
         #[arg(long, value_name = "FEATURE", value_delimiter = ',')]
         extras: Vec<String>,
+
+        /// Reuse a generated crabyard.recipe.toml; explicit flags take precedence
+        #[arg(long, value_name = "FILE")]
+        recipe: Option<PathBuf>,
+
+        /// Start from a curated project configuration
+        #[arg(long, value_enum)]
+        preset: Option<recipe::Preset>,
+
+        /// Print the resolved JSON plan without downloads, installs, or file changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// List curated project presets
+    Presets {
+        /// Print machine-readable preset metadata
+        #[arg(long)]
+        json: bool,
     },
 
     /// Update or switch the UI framework in an existing project
@@ -240,6 +260,9 @@ fn main() -> anyhow::Result<()> {
             pm,
             license_key,
             extras,
+            recipe,
+            preset,
+            dry_run,
         } => {
             generate::run(generate::Config {
                 app_name,
@@ -258,8 +281,12 @@ fn main() -> anyhow::Result<()> {
                 pm,
                 license_key,
                 extras,
+                recipe,
+                preset,
+                dry_run,
             })?;
         }
+        Commands::Presets { json } => recipe::list(json)?,
         Commands::UpdateUi {
             switch,
             template,
@@ -288,14 +315,8 @@ fn main() -> anyhow::Result<()> {
                 dry_run,
             })?;
         }
-        Commands::Eject {
-            project,
-            dry_run,
-        } => {
-            eject::run(eject::Config {
-                project,
-                dry_run,
-            })?;
+        Commands::Eject { project, dry_run } => {
+            eject::run(eject::Config { project, dry_run })?;
         }
         Commands::Preview {
             auth,

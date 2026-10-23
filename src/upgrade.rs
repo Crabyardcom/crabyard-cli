@@ -25,7 +25,8 @@ pub fn run(config: Config) -> Result<()> {
         );
     }
 
-    let manifest_content = fs::read_to_string(&manifest_path).context("Failed to read manifest.toml")?;
+    let manifest_content =
+        fs::read_to_string(&manifest_path).context("Failed to read manifest.toml")?;
     let project_version = extract_toml_value(&manifest_content, "template", "version")
         .unwrap_or_else(|| "unknown".into());
     let auth_module = extract_toml_value(&manifest_content, "modules.auth", "selected")
@@ -33,10 +34,8 @@ pub fn run(config: Config) -> Result<()> {
     let ui_module = extract_toml_value(&manifest_content, "modules.ui", "selected")
         .unwrap_or_else(|| "shadcn".into());
 
-    let template = crate::generate::resolve_template_path(
-        config.template,
-        config.license_key.as_deref(),
-    )?;
+    let template =
+        crate::generate::resolve_template_path(config.template, config.license_key.as_deref())?;
 
     let template_manifest = template.join("base").join("manifest.toml");
     let template_version = if template_manifest.exists() {
@@ -73,7 +72,10 @@ pub fn run(config: Config) -> Result<()> {
         collect_diffs(&ui_dir, &project_dir, &mut diffs)?;
     }
 
-    let outdated: Vec<_> = diffs.iter().filter(|d| d.kind != DiffKind::Unchanged).collect();
+    let outdated: Vec<_> = diffs
+        .iter()
+        .filter(|d| d.kind != DiffKind::Unchanged)
+        .collect();
 
     if outdated.is_empty() {
         println!(
@@ -94,15 +96,26 @@ pub fn run(config: Config) -> Result<()> {
         println!("  {} {}", icon.color(color).bold(), d.rel_path.color(color));
     }
 
-    let added = outdated.iter().filter(|d| d.kind == DiffKind::Added).count();
-    let modified = outdated.iter().filter(|d| d.kind == DiffKind::Modified).count();
-    let missing = outdated.iter().filter(|d| d.kind == DiffKind::Missing).count();
+    let added = outdated
+        .iter()
+        .filter(|d| d.kind == DiffKind::Added)
+        .count();
+    let modified = outdated
+        .iter()
+        .filter(|d| d.kind == DiffKind::Modified)
+        .count();
+    let missing = outdated
+        .iter()
+        .filter(|d| d.kind == DiffKind::Missing)
+        .count();
 
     println!();
     println!(
         "  {} {} new, {} modified, {} missing from template",
         "Summary:".truecolor(161, 161, 170),
-        added, modified, missing,
+        added,
+        modified,
+        missing,
     );
 
     if config.dry_run {
@@ -175,11 +188,7 @@ struct FileDiff {
     kind: DiffKind,
 }
 
-fn collect_diffs(
-    overlay_dir: &Path,
-    project_dir: &Path,
-    diffs: &mut Vec<FileDiff>,
-) -> Result<()> {
+fn collect_diffs(overlay_dir: &Path, project_dir: &Path, diffs: &mut Vec<FileDiff>) -> Result<()> {
     for entry in WalkDir::new(overlay_dir).into_iter().filter_map(|e| e.ok()) {
         let src = entry.path();
         let rel = src.strip_prefix(overlay_dir)?;
@@ -206,11 +215,19 @@ fn collect_diffs(
         } else if tokens::is_binary_path(src) {
             let src_bytes = fs::read(src).unwrap_or_default();
             let dst_bytes = fs::read(&dst).unwrap_or_default();
-            if src_bytes == dst_bytes { DiffKind::Unchanged } else { DiffKind::Modified }
+            if src_bytes == dst_bytes {
+                DiffKind::Unchanged
+            } else {
+                DiffKind::Modified
+            }
         } else {
             let src_content = fs::read_to_string(src).unwrap_or_default();
             let dst_content = fs::read_to_string(&dst).unwrap_or_default();
-            if src_content == dst_content { DiffKind::Unchanged } else { DiffKind::Modified }
+            if src_content == dst_content {
+                DiffKind::Unchanged
+            } else {
+                DiffKind::Modified
+            }
         };
 
         diffs.push(FileDiff {

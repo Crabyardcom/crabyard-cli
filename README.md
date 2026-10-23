@@ -1,127 +1,74 @@
 # Crabyard CLI
 
-A generator that creates production-ready Rust Tauri v2 desktop apps from a modular template system.
+A Rust CLI and terminal wizard for generating Tauri v2 desktop applications with React, TypeScript, authentication, UI components, and coding assistant instructions.
 
-## Quick Start
-
-One command to install the CLI and launch the interactive project wizard:
-
-**macOS / Linux:**
+## Generate an app
 
 ```sh
-curl -fsSL https://crabyard.dev/setup.sh | sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-irm https://crabyard.dev/setup.ps1 | iex
-```
-
-## Install (CLI only)
-
-```sh
-# macOS / Linux
-curl -fsSL https://crabyard.dev/install.sh | sh
-
-# Windows (PowerShell)
-irm https://crabyard.dev/install.ps1 | iex
-
-# From source
-cargo install --path .
-```
-
-## Usage
-
-### Generate a new project
-
-```sh
-# Interactive — prompts for all options
 crabyard new
-
-# With app name
-crabyard new "My Desktop App"
-
-# Fully non-interactive
-crabyard new "My App" --auth github --ui shadcn --yes
+crabyard presets
+crabyard new "My App" --preset desktop --yes
 ```
 
-### Options
+The wizard selects authentication (`none`, `github`, `google`), UI (`minimal`, `shadcn`, `daisyui`, `tesign`), package manager, app metadata, and optional Tauri plugins. Normal generation installs frontend dependencies and prepares the local toolchain.
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--auth <MODULE>` | Auth provider: `github`, `google`, or `none` | Interactive |
-| `--ui <FRAMEWORK>` | UI framework: `shadcn` or `daisyui` | Interactive |
-| `--template <DIR>` | Path to local template directory | API download |
-| `--license-key <KEY>` | License key (or `CRABYARD_LICENSE_KEY` env) | — |
-| `--output <DIR>` | Output directory | `./<app-slug>` |
-| `--yes` / `-y` | Accept all defaults | `false` |
-| `--no-git` | Skip `git init` | `false` |
-| `--no-install` | Skip dependency installation | `false` |
+Download the platform installer from [Crabyard](https://crabyard.dev), or build locally with `cargo install --path .`. Installers verify SHA256 sidecars published with CLI releases.
 
-### Check prerequisites
+## Reproducible generation
+
+Every generated application includes `crabyard.recipe.toml`. Reuse it or check it into version control:
 
 ```sh
-crabyard doctor
+crabyard new --recipe ./my-app/crabyard.recipe.toml --output ./another-app --yes
+crabyard new "Local Notes" --preset local-first --dry-run
+crabyard presets --json
 ```
 
-Verifies: Rust, Cargo, Node.js, package manager, Git, Tauri CLI, and platform-specific dependencies (WebView2 on Windows, webkit2gtk/gtk3/libsoup3 on Linux).
+Explicit flags override recipe values. Recipes reject unknown fields and do not store license keys or machine paths. Dry runs produce a JSON plan without downloads, installs, or filesystem writes.
 
-## Template System
-
-Crabyard uses a modular overlay system:
-
-```
-scaffold/
-  base/           # Core Tauri v2 + React + TypeScript template
-  auth/github/    # GitHub OAuth Device Flow
-  auth/google/    # Google OAuth (PKCE loopback)
-  auth/none/      # No authentication
-  ui/shadcn/      # shadcn/ui components
-  ui/daisyui/     # DaisyUI components
-  manifest.toml   # Module definitions
-```
-
-The generator copies the base template, applies the selected auth and UI overlays, replaces tokens (`{{APP_NAME}}`, `{{APP_SLUG}}`, etc.), and runs post-generation hooks (dependency install, git init).
-
-## License Key
-
-Purchase a license at [crabyard.dev](https://crabyard.dev) to download templates from the API. Set your key:
+For CI or machines that only need to generate source:
 
 ```sh
-export CRABYARD_LICENSE_KEY=TK-...
+git clone https://github.com/Crabyardcom/crabyard-templates ../crabyard-templates
+crabyard new "Example" --template ../crabyard-templates --auth none --ui minimal --pm npm --yes --no-install --no-git
 ```
 
-Or pass it directly:
+This headless path does not require a terminal or install desktop build tools. Building the generated desktop app still requires platform prerequisites reported by `crabyard doctor`.
 
-```sh
-crabyard new "My App" --license-key TK-...
-```
+## Generated foundations
+
+- Tauri v2 backend, React 19 frontend, typed IPC, state and settings.
+- GitHub device flow or Google PKCE authentication, with OS credential storage.
+- Optional plugins through `crabyard add list` and `crabyard add FEATURE`.
+- Agent guidance for Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI, and Windsurf.
+- Frontend type checking, linting, tests, builds, and desktop CI.
+- A reusable recipe and metadata for template upgrades.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `new` | Generate an app with the wizard, flags, recipe, or preset |
+| `presets` | Inspect curated feature selections; supports `--json` |
+| `doctor` | Check and prepare development prerequisites |
+| `preview` | Inspect template file selections |
+| `add` | Add optional Tauri plugins; supports `--dry-run` |
+| `init` | Track an existing Tauri project |
+| `upgrade` | Apply template updates with conflict checks |
+| `update-ui` | Switch or roll back UI overlays |
+| `plugins` | Browse plugin metadata |
+| `eject` | Remove generator metadata |
+| `completions` | Generate shell completions |
+
+Run `crabyard COMMAND --help` for flags. License downloads use `CRABYARD_LICENSE_KEY`; local template source uses `CRABYARD_TEMPLATE` or `--template`.
 
 ## Development
 
 ```sh
-# Build
-cargo build
-
-# Run locally with a local template
-CRABYARD_TEMPLATE=../scaffold cargo run -- new "Test App" --yes --no-git --no-install
-
-# Run tests
-cargo test
+cargo fmt --check
+cargo test --locked
+cargo clippy --all-targets --locked
+cargo run -- new "Smoke App" --template ../crabyard-templates --preset minimal --yes --no-install --no-git
 ```
 
-## Release
-
-Push a version tag to trigger the release workflow:
-
-```sh
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Builds binaries for Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64), then creates a GitHub Release.
-
-## License
-
-Proprietary. See [crabyard.dev](https://crabyard.dev) for licensing details.
+This is an independent repository. Other components live in the [Crabyardcom organization](https://github.com/Crabyardcom). See [release and deployment notes](docs/operations.md).

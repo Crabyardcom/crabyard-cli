@@ -10,18 +10,13 @@ pub struct Config {
     pub dry_run: bool,
 }
 
-const CRABYARD_FILES: &[&str] = &[
-    "manifest.toml",
-    "MEMORY.md",
-];
+const CRABYARD_FILES: &[&str] = &["manifest.toml", "MEMORY.md"];
 
-const SKIP_DIRS: &[&str] = &[
-    "node_modules", "target", ".git", "dist", ".cache",
-];
+const SKIP_DIRS: &[&str] = &["node_modules", "target", ".git", "dist", ".cache"];
 
 const TEXT_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "js", "jsx", "json", "toml", "yaml", "yml",
-    "rs", "css", "html", "md", "svg", "sh", "ps1",
+    "ts", "tsx", "js", "jsx", "json", "toml", "yaml", "yml", "rs", "css", "html", "md", "svg",
+    "sh", "ps1",
 ];
 
 pub fn run(config: Config) -> Result<()> {
@@ -30,15 +25,11 @@ pub fn run(config: Config) -> Result<()> {
         .with_context(|| format!("Cannot resolve project path: {}", project.display()))?;
 
     if !project.join("src-tauri").exists() {
-        anyhow::bail!(
-            "Not a Tauri project. Run this command from the root of a Crabyard project."
-        );
+        anyhow::bail!("Not a Tauri project. Run this command from the root of a Crabyard project.");
     }
 
     if !project.join("manifest.toml").exists() {
-        anyhow::bail!(
-            "No manifest.toml found — project may already be ejected."
-        );
+        anyhow::bail!("No manifest.toml found — project may already be ejected.");
     }
 
     println!();
@@ -69,15 +60,12 @@ pub fn run(config: Config) -> Result<()> {
         }
     }
 
-    for entry in WalkDir::new(&project)
-        .into_iter()
-        .filter_entry(|e| {
-            !e.file_name()
-                .to_str()
-                .map(|s| SKIP_DIRS.contains(&s))
-                .unwrap_or(false)
-        })
-    {
+    for entry in WalkDir::new(&project).into_iter().filter_entry(|e| {
+        !e.file_name()
+            .to_str()
+            .map(|s| SKIP_DIRS.contains(&s))
+            .unwrap_or(false)
+    }) {
         let entry = entry?;
         if !entry.file_type().is_file() {
             continue;

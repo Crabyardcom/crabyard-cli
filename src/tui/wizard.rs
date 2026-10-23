@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -81,10 +83,22 @@ pub fn run_wizard(
     pre_description: Option<&str>,
 ) -> anyhow::Result<Option<WizardResult>> {
     let pm_items = vec![
-        SelectItem { label: "bun".into(), description: "Fast all-in-one JS runtime".into() },
-        SelectItem { label: "pnpm".into(), description: "Fast, disk space efficient".into() },
-        SelectItem { label: "yarn".into(), description: "Classic package manager".into() },
-        SelectItem { label: "npm".into(), description: "Node.js default".into() },
+        SelectItem {
+            label: "bun".into(),
+            description: "Fast all-in-one JS runtime".into(),
+        },
+        SelectItem {
+            label: "pnpm".into(),
+            description: "Fast, disk space efficient".into(),
+        },
+        SelectItem {
+            label: "yarn".into(),
+            description: "Classic package manager".into(),
+        },
+        SelectItem {
+            label: "npm".into(),
+            description: "Node.js default".into(),
+        },
     ];
     let mut pm_select = SelectState::new(pm_items);
     if let Some(pm) = pre_pm {
@@ -96,9 +110,18 @@ pub fn run_wizard(
     }
 
     let auth_items = vec![
-        SelectItem { label: "github".into(), description: "GitHub Device Flow OAuth".into() },
-        SelectItem { label: "google".into(), description: "Google PKCE Loopback OAuth".into() },
-        SelectItem { label: "none".into(), description: "No authentication".into() },
+        SelectItem {
+            label: "github".into(),
+            description: "GitHub Device Flow OAuth".into(),
+        },
+        SelectItem {
+            label: "google".into(),
+            description: "Google PKCE Loopback OAuth".into(),
+        },
+        SelectItem {
+            label: "none".into(),
+            description: "No authentication".into(),
+        },
     ];
     let mut auth_select = SelectState::new(auth_items);
     if let Some(auth) = pre_auth {
@@ -110,10 +133,22 @@ pub fn run_wizard(
     }
 
     let ui_items = vec![
-        SelectItem { label: "shadcn".into(), description: "Radix + Tailwind components".into() },
-        SelectItem { label: "daisyui".into(), description: "Tailwind component library".into() },
-        SelectItem { label: "tesign".into(), description: "Custom design system".into() },
-        SelectItem { label: "minimal".into(), description: "Tailwind only, no components".into() },
+        SelectItem {
+            label: "shadcn".into(),
+            description: "Radix + Tailwind components".into(),
+        },
+        SelectItem {
+            label: "daisyui".into(),
+            description: "Tailwind component library".into(),
+        },
+        SelectItem {
+            label: "tesign".into(),
+            description: "Custom design system".into(),
+        },
+        SelectItem {
+            label: "minimal".into(),
+            description: "Tailwind only, no components".into(),
+        },
     ];
     let mut ui_select = SelectState::new(ui_items);
     if let Some(ui) = pre_ui {
@@ -125,25 +160,101 @@ pub fn run_wizard(
     }
 
     let extras_items = vec![
-        MultiSelectItem { name: "notifications".into(), label: "Notifications — system notifications".into(), checked: false },
-        MultiSelectItem { name: "clipboard".into(), label: "Clipboard — read/write system clipboard".into(), checked: false },
-        MultiSelectItem { name: "global-shortcut".into(), label: "Global Shortcuts — system-wide hotkeys".into(), checked: false },
-        MultiSelectItem { name: "autostart".into(), label: "Autostart — launch at system startup".into(), checked: false },
-        MultiSelectItem { name: "log".into(), label: "Logging — structured logging".into(), checked: false },
-        MultiSelectItem { name: "sql".into(), label: "SQLite — embedded database".into(), checked: false },
-        MultiSelectItem { name: "fs".into(), label: "Filesystem — file read/write access".into(), checked: false },
-        MultiSelectItem { name: "shell".into(), label: "Shell — execute system commands".into(), checked: false },
-        MultiSelectItem { name: "http".into(), label: "HTTP Client — make HTTP requests".into(), checked: false },
-        MultiSelectItem { name: "deep-link".into(), label: "Deep Links — custom URL protocol".into(), checked: false },
-        MultiSelectItem { name: "window-state".into(), label: "Window State — persist size/position".into(), checked: false },
-        MultiSelectItem { name: "cmdk".into(), label: "Command Palette — Ctrl+K search".into(), checked: false },
-        MultiSelectItem { name: "i18n".into(), label: "i18n — internationalization".into(), checked: false },
-        MultiSelectItem { name: "tanstack-query".into(), label: "TanStack Query — data fetching".into(), checked: false },
-        MultiSelectItem { name: "framer-motion".into(), label: "Motion — animations & transitions".into(), checked: false },
-        MultiSelectItem { name: "react-hook-form".into(), label: "React Hook Form + Zod".into(), checked: false },
-        MultiSelectItem { name: "tanstack-router".into(), label: "TanStack Router — type-safe routing".into(), checked: false },
-        MultiSelectItem { name: "date-fns".into(), label: "date-fns — date utilities".into(), checked: false },
-        MultiSelectItem { name: "sentry".into(), label: "Sentry — error tracking".into(), checked: false },
+        MultiSelectItem {
+            name: "notifications".into(),
+            label: "Notifications — system notifications".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "clipboard".into(),
+            label: "Clipboard — read/write system clipboard".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "global-shortcut".into(),
+            label: "Global Shortcuts — system-wide hotkeys".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "autostart".into(),
+            label: "Autostart — launch at system startup".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "log".into(),
+            label: "Logging — structured logging".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "sql".into(),
+            label: "SQLite — embedded database".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "fs".into(),
+            label: "Filesystem — file read/write access".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "shell".into(),
+            label: "Shell — execute system commands".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "http".into(),
+            label: "HTTP Client — make HTTP requests".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "deep-link".into(),
+            label: "Deep Links — custom URL protocol".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "window-state".into(),
+            label: "Window State — persist size/position".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "cmdk".into(),
+            label: "Command Palette — Ctrl+K search".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "i18n".into(),
+            label: "i18n — internationalization".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "tanstack-query".into(),
+            label: "TanStack Query — data fetching".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "framer-motion".into(),
+            label: "Motion — animations & transitions".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "react-hook-form".into(),
+            label: "React Hook Form + Zod".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "tanstack-router".into(),
+            label: "TanStack Router — type-safe routing".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "date-fns".into(),
+            label: "date-fns — date utilities".into(),
+            checked: false,
+        },
+        MultiSelectItem {
+            name: "sentry".into(),
+            label: "Sentry — error tracking".into(),
+            checked: false,
+        },
     ];
     let extras_select = MultiSelectState::new(extras_items).with_preselected(pre_extras);
 
@@ -165,8 +276,12 @@ pub fn run_wizard(
 
     let metadata = TextInputState::new(vec![
         TextField::new("App name", "My App").with_value(&name_val),
-        TextField::new("Slug", "my-app").with_value(&slug_val).with_derived(true),
-        TextField::new("Bundle ID", "com.example.my-app").with_value(&bundle_val).with_derived(true),
+        TextField::new("Slug", "my-app")
+            .with_value(&slug_val)
+            .with_derived(true),
+        TextField::new("Bundle ID", "com.example.my-app")
+            .with_value(&bundle_val)
+            .with_derived(true),
         TextField::new("Version", "0.1.0").with_value(pre_version.unwrap_or("0.1.0")),
         TextField::new("Author", "").with_value(pre_author.unwrap_or("")),
         TextField::new("Description", "").with_value(pre_description.unwrap_or("")),
@@ -242,19 +357,35 @@ pub fn run_wizard(
 
     let app_name = {
         let v = state.metadata.value(0);
-        if v.is_empty() { "My App".to_string() } else { v.to_string() }
+        if v.is_empty() {
+            "My App".to_string()
+        } else {
+            v.to_string()
+        }
     };
     let slug = {
         let v = state.metadata.value(1);
-        if v.is_empty() { tokens::to_slug(&app_name) } else { v.to_string() }
+        if v.is_empty() {
+            tokens::to_slug(&app_name)
+        } else {
+            v.to_string()
+        }
     };
     let bundle_id = {
         let v = state.metadata.value(2);
-        if v.is_empty() { tokens::to_bundle_id(&slug) } else { v.to_string() }
+        if v.is_empty() {
+            tokens::to_bundle_id(&slug)
+        } else {
+            v.to_string()
+        }
     };
     let version = {
         let v = state.metadata.value(3);
-        if v.is_empty() { "0.1.0".to_string() } else { v.to_string() }
+        if v.is_empty() {
+            "0.1.0".to_string()
+        } else {
+            v.to_string()
+        }
     };
 
     Ok(Some(WizardResult {
@@ -420,7 +551,11 @@ fn update_derived_fields(state: &mut WizardState) {
     let name = state.metadata.value(0).to_string();
     if !name.is_empty() {
         let slug_field = &state.metadata.fields[1];
-        if slug_field.derived && (slug_field.value.is_empty() || slug_field.value == tokens::to_slug(&name.replace(|c: char| c.is_ascii_uppercase(), ""))) {
+        if slug_field.derived
+            && (slug_field.value.is_empty()
+                || slug_field.value
+                    == tokens::to_slug(&name.replace(|c: char| c.is_ascii_uppercase(), "")))
+        {
             let new_slug = tokens::to_slug(&name);
             state.metadata.fields[1].value = new_slug.clone();
             state.metadata.fields[1].cursor = state.metadata.fields[1].value.len();
@@ -476,8 +611,16 @@ fn render_header(state: &WizardState, frame: &mut ratatui::Frame, area: Rect) {
     .split(inner);
 
     let title = Line::from(vec![
-        Span::styled("Crabyard", Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  v{}", env!("CARGO_PKG_VERSION")), theme::subtitle()),
+        Span::styled(
+            "Crabyard",
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  v{}", env!("CARGO_PKG_VERSION")),
+            theme::subtitle(),
+        ),
     ]);
     frame.render_widget(Paragraph::new(title), rows[0]);
 
@@ -531,14 +674,22 @@ fn render_content(state: &mut WizardState, frame: &mut ratatui::Frame, area: Rec
             ModulePhase::Ui => state.ui_select.render(frame, inner),
         },
         Screen::Extras => {
-            let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
-                .split(inner);
+            let rows = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(inner);
 
             let count = state.extras_select.selected_count();
             let counter = Line::from(vec![
                 Span::styled(
                     format!("{count} selected"),
-                    if count > 0 { theme::accent() } else { theme::subtitle() },
+                    if count > 0 {
+                        theme::accent()
+                    } else {
+                        theme::subtitle()
+                    },
                 ),
                 Span::styled("  Space to toggle", Style::default().fg(theme::DIM)),
             ]);
@@ -560,28 +711,54 @@ fn render_summary(state: &WizardState, frame: &mut ratatui::Frame, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     let pairs: Vec<(&str, String)> = vec![
-        ("Package manager", state.pm_select.selected_label().to_string()),
-        ("Auth provider", state.auth_select.selected_label().to_string()),
+        (
+            "Package manager",
+            state.pm_select.selected_label().to_string(),
+        ),
+        (
+            "Auth provider",
+            state.auth_select.selected_label().to_string(),
+        ),
         ("UI framework", state.ui_select.selected_label().to_string()),
         ("Extras", {
             let count = state.extras_select.selected_count();
-            if count == 0 { "none".into() } else { format!("{count} selected") }
+            if count == 0 {
+                "none".into()
+            } else {
+                format!("{count} selected")
+            }
         }),
         ("App name", {
             let v = state.metadata.value(0);
-            if v.is_empty() { "My App".into() } else { v.into() }
+            if v.is_empty() {
+                "My App".into()
+            } else {
+                v.into()
+            }
         }),
         ("Slug", {
             let v = state.metadata.value(1);
-            if v.is_empty() { "my-app".into() } else { v.into() }
+            if v.is_empty() {
+                "my-app".into()
+            } else {
+                v.into()
+            }
         }),
         ("Bundle ID", {
             let v = state.metadata.value(2);
-            if v.is_empty() { "com.example.my-app".into() } else { v.into() }
+            if v.is_empty() {
+                "com.example.my-app".into()
+            } else {
+                v.into()
+            }
         }),
         ("Version", {
             let v = state.metadata.value(3);
-            if v.is_empty() { "0.1.0".into() } else { v.into() }
+            if v.is_empty() {
+                "0.1.0".into()
+            } else {
+                v.into()
+            }
         }),
     ];
 

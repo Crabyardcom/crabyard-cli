@@ -14,14 +14,15 @@ pub struct Config {
 }
 
 pub fn run(config: Config) -> Result<()> {
-    let template = crate::generate::resolve_template_path(
-        config.template,
-        config.license_key.as_deref(),
-    )?;
+    let template =
+        crate::generate::resolve_template_path(config.template, config.license_key.as_deref())?;
 
     let base_dir = template.join("base");
     if !base_dir.is_dir() {
-        anyhow::bail!("Template missing 'base/' directory at {}", base_dir.display());
+        anyhow::bail!(
+            "Template missing 'base/' directory at {}",
+            base_dir.display()
+        );
     }
 
     let auth_dir = template.join("auth").join(&config.auth);
@@ -56,20 +57,19 @@ pub fn run(config: Config) -> Result<()> {
         if let Some(parent) = path.parent() {
             let dir = parent.display().to_string();
             if !dir.is_empty() && dirs_printed.insert(dir.clone()) {
-                println!(
-                    "  {}",
-                    format!("{}/", dir).truecolor(6, 182, 212)
-                );
+                println!("  {}", format!("{}/", dir).truecolor(6, 182, 212));
             }
         }
-        let name = path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default();
-        let dir_prefix = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_default();
+        let dir_prefix = path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         let indent = if dir_prefix.is_empty() { "  " } else { "    " };
-        println!(
-            "{}{}",
-            indent,
-            name.truecolor(228, 228, 231)
-        );
+        println!("{}{}", indent, name.truecolor(228, 228, 231));
     }
 
     println!();
@@ -84,13 +84,9 @@ pub fn run(config: Config) -> Result<()> {
 }
 
 fn collect_files(source: &Path, files: &mut Vec<String>) -> Result<()> {
-    for entry in WalkDir::new(source)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in WalkDir::new(source).into_iter().filter_map(|e| e.ok()) {
         let src = entry.path();
-        let rel = src.strip_prefix(source)
-            .context("Failed to strip prefix")?;
+        let rel = src.strip_prefix(source).context("Failed to strip prefix")?;
 
         if tokens::should_skip_path(rel) {
             continue;

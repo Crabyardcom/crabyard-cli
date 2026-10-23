@@ -150,7 +150,10 @@ impl MultiSelectState {
 
     fn render_items(&mut self, frame: &mut ratatui::Frame, area: Rect, indices: &[usize]) {
         if indices.is_empty() {
-            let msg = Line::from(Span::styled("  No matches", Style::default().fg(theme::DIM)));
+            let msg = Line::from(Span::styled(
+                "  No matches",
+                Style::default().fg(theme::DIM),
+            ));
             frame.render_widget(Paragraph::new(msg), area);
             return;
         }

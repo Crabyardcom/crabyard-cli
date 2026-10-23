@@ -1,0 +1,83 @@
+name: Release CLI
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate release version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          test "$GITHUB_REF_NAME" = "v$version"
+      - name: Install ARM linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - run: cargo test --locked
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      - name: Package and checksum
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir artifacts
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            (cd "target/$TARGET/release" && 7z a "../../../artifacts/crabyard-$TARGET.zip" crabyard.exe)
+          else
+            tar -czf "artifacts/crabyard-$TARGET.tar.gz" -C "target/$TARGET/release" crabyard
+          fi
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          for asset in list(Path('artifacts').iterdir()):
+              digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+              asset.with_name(asset.name + '.sha256').write_text(f'{digest}  {asset.name}\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crabyard-${{ matrix.target }}
+          path: artifacts/*
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish verified binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd artifacts
+          cat *.sha256 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          gh release create "$TAG" --verify-tag --generate-notes ./*

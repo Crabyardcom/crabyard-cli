@@ -23,6 +23,7 @@ pub fn install_deps(dir: &Path, pm: &str) -> Result<()> {
 
 /// Generate all platform icons from public/crab.svg using the local tauri CLI.
 pub fn generate_icons(dir: &Path) -> Result<()> {
+    let dir = std::fs::canonicalize(dir).context("Cannot access generated project")?;
     let output = {
         #[cfg(windows)]
         {

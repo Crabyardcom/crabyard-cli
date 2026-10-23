@@ -5,9 +5,9 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use walkdir::WalkDir;
 
+use crate::license;
 use crate::overlay;
 use crate::tokens;
-use crate::license;
 
 const UI_OPTIONS: &[&str] = &["shadcn", "daisyui", "tesign", "minimal"];
 
@@ -115,7 +115,10 @@ pub fn run(config: Config) -> Result<()> {
 
     print_changes(&changes);
 
-    let modified_count = changes.iter().filter(|c| c.kind == ChangeKind::Modified).count();
+    let modified_count = changes
+        .iter()
+        .filter(|c| c.kind == ChangeKind::Modified)
+        .count();
     if modified_count > 0 && !config.force && !config.dry_run {
         println!(
             "\n  {} {} file(s) have local modifications that will be overwritten.",
@@ -139,7 +142,10 @@ pub fn run(config: Config) -> Result<()> {
     }
 
     if switching {
-        remove_old_overlay_files(&template.join("ui").join(&manifest.current_ui), &project_dir)?;
+        remove_old_overlay_files(
+            &template.join("ui").join(&manifest.current_ui),
+            &project_dir,
+        )?;
     }
 
     apply_overlay(&ui_dir, &project_dir)?;
@@ -246,7 +252,11 @@ fn print_changes(changes: &[FileChange]) {
             ChangeKind::Modified => ("~", colored::Color::Yellow),
             ChangeKind::Unchanged => (" ", colored::Color::White),
         };
-        println!("  {} {}", icon.color(style).bold(), change.rel_path.color(style));
+        println!(
+            "  {} {}",
+            icon.color(style).bold(),
+            change.rel_path.color(style)
+        );
     }
 }
 
@@ -274,8 +284,7 @@ fn apply_overlay(overlay_dir: &Path, project_dir: &Path) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        fs::copy(src, &dst)
-            .with_context(|| format!("Failed to copy: {}", src.display()))?;
+        fs::copy(src, &dst).with_context(|| format!("Failed to copy: {}", src.display()))?;
     }
     Ok(())
 }
@@ -287,7 +296,10 @@ fn remove_old_overlay_files(old_overlay_dir: &Path, project_dir: &Path) -> Resul
 
     let mut files_to_remove = Vec::new();
 
-    for entry in WalkDir::new(old_overlay_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(old_overlay_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -313,7 +325,10 @@ fn read_manifest(path: &Path) -> Result<ProjectManifest> {
     let ui = extract_toml_value(&content, "modules.ui", "selected")
         .context("manifest.toml missing [modules.ui] selected")?;
     let previous_ui = extract_toml_value(&content, "modules.ui", "previous");
-    Ok(ProjectManifest { current_ui: ui, previous_ui })
+    Ok(ProjectManifest {
+        current_ui: ui,
+        previous_ui,
+    })
 }
 
 fn set_manifest_previous_ui(path: &Path, previous: &str) -> Result<()> {
@@ -341,8 +356,7 @@ fn set_manifest_previous_ui(path: &Path, previous: &str) -> Result<()> {
 
 fn manifest_auth(path: &Path) -> Result<String> {
     let content = fs::read_to_string(path).context("Failed to read manifest.toml")?;
-    Ok(extract_toml_value(&content, "modules.auth", "selected")
-        .unwrap_or_else(|| "none".into()))
+    Ok(extract_toml_value(&content, "modules.auth", "selected").unwrap_or_else(|| "none".into()))
 }
 
 fn extract_toml_value(content: &str, section: &str, key: &str) -> Option<String> {

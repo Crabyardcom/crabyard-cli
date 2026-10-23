@@ -17,8 +17,8 @@ pub fn load_module_config(path: &Path) -> Result<ModuleConfig> {
     if !path.exists() {
         return Ok(ModuleConfig::default());
     }
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
     let config: ModuleConfig = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
     Ok(config)
@@ -32,7 +32,8 @@ pub fn apply_markers(content: &str, markers: &HashMap<String, String>) -> String
         let trimmed = line.trim();
         if let Some(marker_name) = extract_marker(trimmed) {
             if let Some(cond_key) = marker_name.strip_prefix("CRABYARD:IF_") {
-                let active = markers.get(&format!("CRABYARD:{cond_key}"))
+                let active = markers
+                    .get(&format!("CRABYARD:{cond_key}"))
                     .map_or(false, |v| !v.is_empty());
                 if !active || skip_depth > 0 {
                     skip_depth += 1;
@@ -40,7 +41,8 @@ pub fn apply_markers(content: &str, markers: &HashMap<String, String>) -> String
                 continue;
             }
             if let Some(cond_key) = marker_name.strip_prefix("CRABYARD:UNLESS_") {
-                let active = markers.get(&format!("CRABYARD:{cond_key}"))
+                let active = markers
+                    .get(&format!("CRABYARD:{cond_key}"))
                     .map_or(false, |v| !v.is_empty());
                 if active || skip_depth > 0 {
                     skip_depth += 1;
@@ -95,10 +97,7 @@ fn extract_marker(trimmed: &str) -> Option<&str> {
     None
 }
 
-pub fn merge_package_deps(
-    package_json_path: &Path,
-    configs: &[&ModuleConfig],
-) -> Result<()> {
+pub fn merge_package_deps(package_json_path: &Path, configs: &[&ModuleConfig]) -> Result<()> {
     if !package_json_path.exists() {
         return Ok(());
     }

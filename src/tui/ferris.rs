@@ -32,7 +32,11 @@ const CELEBRATE_PALETTE: [Color; 6] = [
 ];
 
 pub fn line_color(line_idx: usize, tick: usize, celebrating: bool) -> Color {
-    let palette = if celebrating { &CELEBRATE_PALETTE } else { &WAVE_PALETTE };
+    let palette = if celebrating {
+        &CELEBRATE_PALETTE
+    } else {
+        &WAVE_PALETTE
+    };
     let offset = tick / 2;
     palette[(line_idx + offset) % palette.len()]
 }

@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Rust build artifacts
+target/
+
+# Build outputs
+dist/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Next.js
+next-env.d.ts
+
+# External repos (not part of Crabyard)
+github-repo-syncer/
+
+# Wrangler
+.wrangler/
+.dev.vars
+
+# Claude
+.claude/
+/scripts/release.ps1
+
+# Bun
+bun.lockb
+
+# Misc
+*.tsbuildinfo

@@ -21,9 +21,7 @@ pub fn run(config: Config) -> Result<()> {
 
     let tauri_conf = project_dir.join("src-tauri").join("tauri.conf.json");
     if !tauri_conf.exists() {
-        bail!(
-            "No src-tauri/tauri.conf.json found — run this command from a Tauri v2 project root"
-        );
+        bail!("No src-tauri/tauri.conf.json found — run this command from a Tauri v2 project root");
     }
 
     println!(
@@ -69,11 +67,7 @@ selected = "{pm}"
     }
 
     fs::write(&manifest_path, &manifest)?;
-    println!(
-        "  {} Created {}",
-        "✓".green(),
-        manifest_path.display()
-    );
+    println!("  {} Created {}", "✓".green(), manifest_path.display());
     println!();
     println!(
         "  You can now use {} and {} in this project.",

@@ -31,21 +31,23 @@ pub enum WorkerMsg {
     AllDone,
 }
 
-pub fn run_generation<F>(app_slug: &str, steps: Vec<Step>, work: F) -> anyhow::Result<()>
+pub fn run_generation<F>(
+    app_slug: &str,
+    steps: Vec<Step>,
+    headless: bool,
+    work: F,
+) -> anyhow::Result<()>
 where
     F: FnOnce(mpsc::Sender<WorkerMsg>) -> anyhow::Result<()> + Send + 'static,
 {
-    let mut terminal = super::enter_tui().map_err(|e| anyhow::anyhow!("Failed to enter TUI: {e}"))?;
+    if headless {
+        return run_plain(steps, work);
+    }
+    let mut terminal =
+        super::enter_tui().map_err(|e| anyhow::anyhow!("Failed to enter TUI: {e}"))?;
     let (tx, rx) = mpsc::channel::<WorkerMsg>();
 
-    let work_result: std::sync::Arc<std::sync::Mutex<Option<anyhow::Result<()>>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(None));
-    let work_result_clone = work_result.clone();
-
-    thread::spawn(move || {
-        let result = work(tx);
-        *work_result_clone.lock().unwrap() = Some(result);
-    });
+    let worker = thread::spawn(move || work(tx));
 
     let mut view = GenerationView::new(app_slug.to_string(), steps);
     let tick_rate = Duration::from_millis(100);
@@ -54,64 +56,86 @@ where
     let mut pending_msgs: Vec<WorkerMsg> = Vec::new();
     let mut all_done = false;
 
-    loop {
-        terminal
-            .draw(|f| view.render(f))
-            .map_err(|e| anyhow::anyhow!("Render error: {e}"))?;
-
-        if poll_quit(tick_rate) {
-            break;
-        }
-
-        view.tick += 1;
-
-        while let Ok(msg) = rx.try_recv() {
-            pending_msgs.push(msg);
-        }
-
-        if !pending_msgs.is_empty() && last_step_time.elapsed() >= min_step_time {
-            let msg = pending_msgs.remove(0);
-            match msg {
-                WorkerMsg::StepDone(i) => {
-                    view.complete_step(i);
-                    last_step_time = Instant::now();
-                }
-                WorkerMsg::StepFailed(i, err) => {
-                    view.fail_step(i, Some(err));
-                    last_step_time = Instant::now();
-                }
-                WorkerMsg::AllDone => {
-                    all_done = true;
-                }
-            }
-        }
-
-        if all_done && pending_msgs.is_empty() {
-            view.celebrating = true;
+    let render_result = (|| -> anyhow::Result<()> {
+        loop {
             terminal
                 .draw(|f| view.render(f))
                 .map_err(|e| anyhow::anyhow!("Render error: {e}"))?;
-            thread::sleep(Duration::from_millis(1800));
-            break;
-        }
 
-        if !all_done && pending_msgs.is_empty() {
-            if let Ok(guard) = work_result.try_lock() {
-                if guard.is_some() {
-                    drop(guard);
-                    break;
+            if poll_quit(tick_rate) {
+                break;
+            }
+
+            view.tick += 1;
+
+            while let Ok(msg) = rx.try_recv() {
+                pending_msgs.push(msg);
+            }
+
+            if !pending_msgs.is_empty() && last_step_time.elapsed() >= min_step_time {
+                let msg = pending_msgs.remove(0);
+                match msg {
+                    WorkerMsg::StepDone(i) => {
+                        view.complete_step(i);
+                        last_step_time = Instant::now();
+                    }
+                    WorkerMsg::StepFailed(i, err) => {
+                        view.fail_step(i, Some(err));
+                        last_step_time = Instant::now();
+                    }
+                    WorkerMsg::AllDone => {
+                        all_done = true;
+                    }
                 }
             }
+
+            if all_done && pending_msgs.is_empty() {
+                view.celebrating = true;
+                terminal
+                    .draw(|f| view.render(f))
+                    .map_err(|e| anyhow::anyhow!("Render error: {e}"))?;
+                thread::sleep(Duration::from_millis(1800));
+                break;
+            }
+
+            if !all_done && pending_msgs.is_empty() && worker.is_finished() {
+                break;
+            }
+        }
+        Ok(())
+    })();
+    let terminal_result =
+        super::leave_tui().map_err(|e| anyhow::anyhow!("Failed to leave TUI: {e}"));
+    let result = worker
+        .join()
+        .map_err(|_| anyhow::anyhow!("Generation worker panicked"))?;
+    result?;
+    render_result?;
+    terminal_result
+}
+
+fn run_plain<F>(steps: Vec<Step>, work: F) -> anyhow::Result<()>
+where
+    F: FnOnce(mpsc::Sender<WorkerMsg>) -> anyhow::Result<()>,
+{
+    let (tx, rx) = mpsc::channel();
+    let result = work(tx);
+    for message in rx {
+        match message {
+            WorkerMsg::StepDone(index) => {
+                if let Some(step) = steps.get(index) {
+                    println!("  done: {}", step.label);
+                }
+            }
+            WorkerMsg::StepFailed(index, error) => {
+                if let Some(step) = steps.get(index) {
+                    eprintln!("  failed: {}: {error}", step.label);
+                }
+            }
+            WorkerMsg::AllDone => {}
         }
     }
-
-    super::leave_tui().map_err(|e| anyhow::anyhow!("Failed to leave TUI: {e}"))?;
-
-    let result = work_result.lock().unwrap().take();
-    match result {
-        Some(r) => r,
-        None => Ok(()),
-    }
+    result
 }
 
 struct GenerationView {
@@ -210,15 +234,12 @@ impl GenerationView {
         let header_inner = header_block.inner(area);
         frame.render_widget(header_block, area);
 
-        let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
-            .split(header_inner);
+        let chunks =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(header_inner);
 
         let title = Line::from(vec![
             Span::styled("  Crabyard ", theme::title()),
-            Span::styled(
-                format!("v{}", env!("CARGO_PKG_VERSION")),
-                theme::subtitle(),
-            ),
+            Span::styled(format!("v{}", env!("CARGO_PKG_VERSION")), theme::subtitle()),
         ]);
         frame.render_widget(Paragraph::new(title), chunks[0]);
 
@@ -230,10 +251,7 @@ impl GenerationView {
         let sub = Line::from(vec![
             Span::styled(subtitle_text, theme::text()),
             if !self.celebrating {
-                Span::styled(
-                    format!(" {}", self.app_slug),
-                    theme::accent(),
-                )
+                Span::styled(format!(" {}", self.app_slug), theme::accent())
             } else {
                 Span::raw("")
             },
@@ -243,10 +261,7 @@ impl GenerationView {
 
     fn render_separator(&self, frame: &mut ratatui::Frame, area: Rect) {
         let sep = "─".repeat(area.width as usize);
-        frame.render_widget(
-            Paragraph::new(sep).style(theme::border()),
-            area,
-        );
+        frame.render_widget(Paragraph::new(sep).style(theme::border()), area);
     }
 
     fn render_body(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -256,8 +271,8 @@ impl GenerationView {
         let body_inner = body_block.inner(area);
         frame.render_widget(body_block, area);
 
-        let cols = Layout::horizontal([Constraint::Length(28), Constraint::Min(30)])
-            .split(body_inner);
+        let cols =
+            Layout::horizontal([Constraint::Length(28), Constraint::Min(30)]).split(body_inner);
 
         self.render_ferris(frame, cols[0]);
         self.render_steps(frame, cols[1]);
@@ -348,8 +363,7 @@ impl GenerationView {
         }
 
         frame.render_widget(
-            Paragraph::new(lines)
-                .style(Style::default().bg(theme::BG)),
+            Paragraph::new(lines).style(Style::default().bg(theme::BG)),
             area,
         );
     }

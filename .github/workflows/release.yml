@@ -20,7 +20,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -51,13 +51,8 @@ jobs:
           if os.environ['RELEASE_TAG'] != f'v{version}':
               raise SystemExit(f'Release tag must match Cargo version v{version}')
           PY
-      - name: Install ARM linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - run: cargo test --locked
       - run: cargo build --release --locked --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Package and checksum
         shell: bash
         env:
